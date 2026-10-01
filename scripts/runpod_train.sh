@@ -25,9 +25,10 @@ export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 OUT=$($PY - --config "$CONFIG" "$@" <<'EOF'
 import sys
 from jev.config import load_config
+from jev.env import env_overrides
 from jev.train import parse_args
 a = parse_args(sys.argv[1:])
-print(load_config(a.config, a.set).train.output_dir)
+print(load_config(a.config, env_overrides() + a.set).train.output_dir)
 EOF
 )
 mkdir -p "$OUT"
@@ -36,6 +37,7 @@ case "$(realpath "$OUT")" in
   *) echo "warning: $OUT is not on /workspace; checkpoints will be lost if the pod is stopped" ;;
 esac
 
+[ -n "${JEV_OVERRIDES:-}" ] && echo "personal overrides (JEV_OVERRIDES): $JEV_OVERRIDES"
 LOG="$OUT/train.log"
 nohup $PY -m jev.launch --config "$CONFIG" --resume "$@" >> "$LOG" 2>&1 &
 echo "started pid $! -> $LOG"

@@ -9,7 +9,7 @@ and returns a **calibrated probability for every option**, with no text generati
 [![Python](https://img.shields.io/badge/python-3.10%2B-3776AB?logo=python&logoColor=white)](https://www.python.org/)
 [![PyTorch](https://img.shields.io/badge/PyTorch-2.5%2B-EE4C2C?logo=pytorch&logoColor=white)](https://pytorch.org/)
 [![Transformers](https://img.shields.io/badge/%F0%9F%A4%97%20Transformers-5.17%2B-FFD21E)](https://github.com/huggingface/transformers)
-[![Dataset](https://img.shields.io/badge/%F0%9F%A4%97%20Dataset-jev--distill--corpus--v3-FFD21E)](https://huggingface.co/datasets/seungminh/jev-distill-corpus-v3)
+[![Dataset](https://img.shields.io/badge/%F0%9F%A4%97%20Dataset-jev--distill--corpus--v3-FFD21E)](https://huggingface.co/datasets/SargeDev/jev-distill-corpus-v3)
 [![W&B](https://img.shields.io/badge/Weights_%26_Biases-ready-FFBE00?logo=weightsandbiases&logoColor=black)](https://wandb.ai/)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
 
@@ -156,11 +156,11 @@ rows, 65 domains, Apache-2.0.
 | `yuri_v1` | 148k | memory-relevance yes/no pairs from open QA datasets (placeholder labels) |
 | `openjev_v2` | 95k | [Open-Jev](https://huggingface.co/datasets/ZefanCai/Open-Jev) rows (CC0), programmatic labels |
 
-**Pinned snapshot.** The configs read [`seungminh/jev-distill-corpus-v3`](https://huggingface.co/datasets/seungminh/jev-distill-corpus-v3)
-at tag `src-fc99c6357a9f`: a byte-identical copy of the source at commit `fc99c63`, so training stays
-reproducible even if the source changes. Point `data.hf_dataset` back at `SargeDev/jev-distill-corpus-v3` to
-read the original. Make your own snapshot with
-`python scripts/mirror_dataset.py --src SargeDev/jev-distill-corpus-v3 --dst <you>/jev-distill-corpus-v3`.
+**Pinned.** The configs read the original dataset at a fixed commit
+(`data.hf_revision: fc99c63…`), so a run always sees the same data even if the dataset is updated later.
+To guard against the source disappearing, snapshot it into your own namespace and point
+`data.hf_dataset` at the copy:
+`python scripts/mirror_dataset.py --src SargeDev/jev-distill-corpus-v3 --dst your-name/jev-distill-corpus-v3`.
 
 Splits: `train` (656k), `validation`, `calibration`, `test`, `ood`, and **`test_set_30k`**, the stratified,
 leakage-checked benchmark used for final evaluation.
@@ -217,6 +217,12 @@ bash scripts/runpod_train.sh configs/jev-9b.yaml    # 🏃 background run → ru
 
 - 🔁 `runpod_train.sh` always resumes: if the pod is preempted, run the same command again and training
   continues from `runs/<name>/last`.
+- 🙋 Personal settings (your own dataset mirror, Hub repo, ...) go in `.env.local`, which is never
+  committed, instead of editing the shared configs:
+  ```bash
+  JEV_OVERRIDES="data.hf_dataset=your-name/jev-distill-corpus-v3 train.hf_push=your-name/jev-9b-v2"
+  ```
+  They are applied before `--set` and printed at the start of the log.
 - 🧊 After the first successful run, freeze the versions so every future pod is identical:
   ```bash
   pip freeze > scripts/requirements.lock && git add scripts/requirements.lock && git commit -m "Lock versions"
@@ -241,7 +247,7 @@ training pushes checkpoints to the Hub by itself:
 
 ```yaml
 train:
-  hf_push: auto          # default: <token account>/<output_dir name>, e.g. smha1012/jev-9b
+  hf_push: auto          # default: <token account>/<output_dir name>, e.g. your-name/jev-9b
   # hf_push: myorg/jev-9b   explicit repo (a missing token or write access stops the run at startup)
   # hf_push: null           never push
   hf_private: true       # repos are created private by default
@@ -253,9 +259,11 @@ train:
   repo history). Use a different `hf_push` per run when you want to compare runs.
 - 🔁 A failed upload never stops training; it is reported in the log and training continues.
 - With `max_steps` shorter than one epoch (as in `jev-9b.yaml` / `jev-27b.yaml`), only the `final` push happens.
-- Load any version: `JEVPredictor("smha1012/jev-9b")` (latest) or `JEVPredictor("smha1012/jev-9b", revision="epoch-1")`.
+- Load any version: `JEVPredictor("your-name/jev-9b")` (latest) or `JEVPredictor("your-name/jev-9b", revision="epoch-1")`.
 
 The token needs **write** access. Without a token, checkpoints simply stay in `runs/<name>/`.
+Uploads always go to the account that owns the token, so anyone training with this repo publishes to
+their own namespace.
 
 ### 📁 Outputs
 
@@ -283,7 +291,7 @@ Load a checkpoint from the 🤗 Hub by repo id, or from a local run directory:
 ```python
 from jev import JEVPredictor
 
-jev = JEVPredictor("smha1012/jev-9b")        # or JEVPredictor("runs/jev-9b/best")
+jev = JEVPredictor("your-name/jev-9b")        # or JEVPredictor("runs/jev-9b/best")
 
 jev.predict(
     kind="noul",
@@ -298,14 +306,14 @@ jev.predict(
 expected value of a `score`, and **confidence-threshold routing** (act when p ≥ 0.85, otherwise escalate):
 
 ```bash
-python examples/inference.py --model smha1012/jev-9b
+python examples/inference.py --model your-name/jev-9b
 ```
 
 From the command line:
 
 ```bash
-python -m jev.predict --ckpt smha1012/jev-9b --input my_questions.jsonl            # per-example probabilities
-python -m jev.predict --ckpt smha1012/jev-9b --input labeled.jsonl --metrics       # aggregate metrics
+python -m jev.predict --ckpt your-name/jev-9b --input my_questions.jsonl            # per-example probabilities
+python -m jev.predict --ckpt your-name/jev-9b --input labeled.jsonl --metrics       # aggregate metrics
 ```
 
 ### 🤗 Sharing a checkpoint manually

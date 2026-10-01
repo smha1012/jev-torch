@@ -1,7 +1,7 @@
 """Snapshot a Hugging Face dataset into your own namespace, pinned to one source commit.
 
     HF_TOKEN=<write token> python scripts/mirror_dataset.py \
-        --src SargeDev/jev-distill-corpus-v3 --dst seungminh/jev-distill-corpus-v3 [--private]
+        --src SargeDev/jev-distill-corpus-v3 --dst your-name/jev-distill-corpus-v3 [--private]
 
 Why: training then reads a copy that cannot change or disappear under you. Data files are byte-identical.
 The source's dataset card (including its split -> file mapping, which `load_dataset` relies on) is kept

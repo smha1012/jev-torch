@@ -6,7 +6,7 @@ CLI:
 
 Python:
     from jev import JEVPredictor
-    jev = JEVPredictor("smha1012/jev-9b")      # Hub repo id, or a local runs/<name>/best
+    jev = JEVPredictor("your-name/jev-9b")      # Hub repo id, or a local runs/<name>/best
     jev.predict(kind="choice", state="...", question="Root cause?", options=["a", "b", "c"])
     # -> {"a": 0.71, "b": 0.22, "c": 0.07}
 """
@@ -29,7 +29,7 @@ class JEVPredictor:
     """Load a trained JEV model and score options.
 
     `ckpt` is a local checkpoint directory (runs/<name>/best) or a Hugging Face Hub repo id
-    (e.g. "smha1012/jev-9b"); Hub checkpoints are downloaded once and cached.
+    (e.g. "your-name/jev-9b"); Hub checkpoints are downloaded once and cached.
     """
 
     def __init__(self, ckpt: str, device: str = "auto", max_length: int = 1024, batch_size: int = 16,

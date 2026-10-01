@@ -1,6 +1,6 @@
 """Inference examples for a trained JEV model.
 
-    python examples/inference.py --model smha1012/jev-9b      # from the Hugging Face Hub
+    python examples/inference.py --model your-name/jev-9b      # from the Hugging Face Hub
     python examples/inference.py --model runs/jev-9b/best     # from a local checkpoint
 """
 

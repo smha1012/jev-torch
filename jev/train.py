@@ -20,7 +20,7 @@ import torch
 
 from .config import load_config
 from .distributed import cleanup, pick_dtype, setup
-from .env import load_env
+from .env import env_overrides, load_env
 from .hub import HubUploader
 from .model import JEVModel
 from .sources import describe_source, load_split
@@ -37,14 +37,17 @@ def parse_args(argv=None):
 
 def main(argv=None):
     args = parse_args(argv)
-    cfg = load_config(args.config, args.set)
-    load_env()  # HF_TOKEN / WANDB_API_KEY from .env.local; real environment variables win
+    load_env()  # HF_TOKEN / WANDB_API_KEY / JEV_OVERRIDES from .env.local; real environment variables win
+    personal = env_overrides()
+    cfg = load_config(args.config, personal + args.set)
     os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
     ctx = setup(cfg.train.device)
     dtype = pick_dtype(ctx.device, cfg.train.dtype)
     random.seed(cfg.train.seed + ctx.rank)
     torch.manual_seed(cfg.train.seed)
     ctx.print(f"model={cfg.model.name} device={ctx.device} dtype={dtype} world_size={ctx.world_size}")
+    if personal:
+        ctx.print(f"overrides from JEV_OVERRIDES: {' '.join(personal)}")
 
     # Check Hub access before spending time on data and weights: a bad token or missing write
     # permission should stop the run now, not after hours of training. Every rank exits together.

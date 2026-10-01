@@ -131,7 +131,8 @@ if [ "${SKIP_SMOKE:-0}" != "1" ]; then
   SMOKE_GPUS=$(( NGPU >= 2 ? 2 : 1 ))
   say "GPU smoke test: Qwen3.5-0.8B, 4 steps, ${SMOKE_GPUS} GPU(s)"
   rm -rf runs/smoke
-  if $PY -m jev.launch --config configs/smoke.yaml --set train.num_gpus=$SMOKE_GPUS > /tmp/jev-smoke.log 2>&1 \
+  # JEV_OVERRIDES is blanked so personal settings (e.g. a Hub target) never apply to the smoke test.
+  if JEV_OVERRIDES= $PY -m jev.launch --config configs/smoke.yaml --set train.num_gpus=$SMOKE_GPUS > /tmp/jev-smoke.log 2>&1 \
      && [ -f runs/smoke/report.json ]; then
     grep -E "tok/s|temperatures|test_set_30k calibrated" /tmp/jev-smoke.log | tail -4 | sed 's/^/  /'
     if grep -q "falling back to its reference PyTorch implementation" /tmp/jev-smoke.log; then

@@ -11,6 +11,7 @@ import os
 import sys
 
 from .config import load_config
+from .env import env_overrides, load_env
 from .train import main as train_main
 from .train import parse_args
 
@@ -18,7 +19,8 @@ from .train import parse_args
 def main():
     argv = sys.argv[1:]
     args = parse_args(argv)
-    cfg = load_config(args.config, args.set)
+    load_env()
+    cfg = load_config(args.config, env_overrides() + args.set)
     n = cfg.train.num_gpus
     if n <= 1 or "LOCAL_RANK" in os.environ:
         train_main(argv)

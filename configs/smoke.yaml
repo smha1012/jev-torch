@@ -6,8 +6,8 @@ model:
   gradient_checkpointing: true
 data:
   source: jev_distill                 # small random subsets below
-  hf_dataset: seungminh/jev-distill-corpus-v3   # snapshot of SargeDev/jev-distill-corpus-v3
-  hf_revision: src-fc99c6357a9f                 # pinned: byte-identical to source commit fc99c63
+  hf_dataset: SargeDev/jev-distill-corpus-v3
+  hf_revision: fc99c6357a9f89f7512c4a987314352addead049   # pinned source commit (reproducible)
   max_train_examples: 128
   max_eval_examples: 64
   max_length: 512

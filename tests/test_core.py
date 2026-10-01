@@ -341,3 +341,24 @@ def test_load_env_does_not_override(tmp_path, monkeypatch):
     assert os.environ["HF_TOKEN"] == "from_env"  # real environment wins
     assert "WANDB_API_KEY" not in os.environ  # empty template line means unset
     assert os.environ["JEV_TEST_X"] == "quoted"
+
+
+def test_env_overrides_apply_before_cli(monkeypatch):
+    from jev.env import env_overrides
+
+    monkeypatch.setenv("JEV_OVERRIDES", 'train.hf_push=me/jev-9b data.hf_dataset="me/corpus"')
+    over = env_overrides()
+    assert over == ["train.hf_push=me/jev-9b", "data.hf_dataset=me/corpus"]
+    cfg = load_config("configs/jev-9b.yaml", over + ["train.hf_push=cli/wins"])
+    assert cfg.data.hf_dataset == "me/corpus" and cfg.train.hf_push == "cli/wins"
+    monkeypatch.setenv("JEV_OVERRIDES", "")
+    assert env_overrides() == []
+
+
+def test_public_configs_have_no_personal_targets():
+    import glob
+
+    for f in glob.glob("configs/*.yaml"):
+        cfg = load_config(f)
+        assert cfg.train.hf_push in ("auto", None), f
+        assert cfg.data.hf_dataset in (None, "SargeDev/jev-distill-corpus-v3"), f

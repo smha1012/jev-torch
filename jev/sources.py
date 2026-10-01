@@ -76,7 +76,7 @@ def jsonl(cfg: DataConfig, split: str) -> list[JEVExample]:
 @register_source("jev_distill", hf_dataset="SargeDev/jev-distill-corpus-v3")
 def jev_distill(cfg: DataConfig, split: str) -> list[JEVExample]:
     """SargeDev/jev-distill-corpus-v3: 741k rows of TypeSafe Jev 1.13 output distributions.
-    data.hf_dataset can point at a snapshot with the same files (e.g. seungminh/jev-distill-corpus-v3).
+    data.hf_dataset can point at a snapshot with the same files (see scripts/mirror_dataset.py).
 
     Splits: train (656k) / validation / calibration / test / ood / test_set_30k (the held-out
     benchmark, stratified by family and kind). Rows carry `family` and `source` in meta.

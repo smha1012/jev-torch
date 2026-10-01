@@ -96,7 +96,7 @@ class JEVModel(nn.Module):
     def load(cls, ckpt_dir: str | Path, dtype: torch.dtype = torch.float32, device_map=None,
              is_trainable: bool = False, revision: str | None = None):
         """Load a checkpoint from a local directory or a Hugging Face Hub repo id
-        (e.g. "smha1012/jev-9b"). `is_trainable=True` keeps LoRA trainable, e.g. to continue
+        (e.g. "your-name/jev-9b"). `is_trainable=True` keeps LoRA trainable, e.g. to continue
         training or to fine-tune the general model on new data with the same Trainer."""
         ckpt = resolve_checkpoint(ckpt_dir, revision)
         meta = json.loads((ckpt / "jev_config.json").read_text())

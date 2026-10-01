@@ -1,13 +1,13 @@
 """Upload a trained checkpoint to the Hugging Face Hub with a generated model card.
 
-    python -m jev.push_to_hub --ckpt runs/jev-9b/best --repo smha1012/jev-9b            # private
-    python -m jev.push_to_hub --ckpt runs/jev-9b/best --repo smha1012/jev-9b --public
-    python -m jev.push_to_hub --ckpt runs/jev-9b/best --repo smha1012/jev-9b --dry_run out/   # write card only
+    python -m jev.push_to_hub --ckpt runs/jev-9b/best --repo your-name/jev-9b            # private
+    python -m jev.push_to_hub --ckpt runs/jev-9b/best --repo your-name/jev-9b --public
+    python -m jev.push_to_hub --ckpt runs/jev-9b/best --repo your-name/jev-9b --dry_run out/   # write card only
 
 Training already pushes automatically (train.hf_push); this command is for manual uploads.
 The token comes from HF_TOKEN, .env.local, or `hf auth login`. The card pulls training settings from
 <run>/config.yaml and metrics from <run>/report.json when they exist next to the checkpoint.
-Afterwards anyone can run:  JEVPredictor("smha1012/jev-9b")
+Afterwards anyone can run:  JEVPredictor("your-name/jev-9b")
 """
 
 from __future__ import annotations
@@ -133,7 +133,7 @@ This is an independent project, not affiliated with TypeSafe AI or autotrust.
 def main():
     p = argparse.ArgumentParser()
     p.add_argument("--ckpt", required=True, help="checkpoint directory, e.g. runs/jev-9b/best")
-    p.add_argument("--repo", required=True, help="Hub repo id, e.g. smha1012/jev-9b")
+    p.add_argument("--repo", required=True, help="Hub repo id, e.g. your-name/jev-9b")
     p.add_argument("--public", action="store_true", help="create the repo public (default: private)")
     p.add_argument("--tag", help="also tag this upload, e.g. v1")
     p.add_argument("--dry_run", metavar="DIR", help="write the staged upload to DIR instead of uploading")
