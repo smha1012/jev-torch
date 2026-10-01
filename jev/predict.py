@@ -90,6 +90,9 @@ def main():
     p.add_argument("--device", default="auto")
     args = p.parse_args()
 
+    from .env import load_env
+
+    load_env()  # HF_TOKEN for private Hub checkpoints
     jev = JEVPredictor(args.ckpt, device=args.device, batch_size=args.batch_size)
     examples = _read(args.input)
     if args.metrics:

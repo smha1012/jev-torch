@@ -78,6 +78,10 @@ class TrainConfig:
     wandb_entity: str | None = None  # team / user; None = your default entity
     wandb_run_name: str | None = None  # None = output_dir name
     wandb_tags: list[str] = field(default_factory=list)
+    # Hugging Face Hub: "auto" = push to <token account>/<output_dir name> when an HF token exists,
+    # "owner/name" = push there (token required), null = never. Pushes every epoch end + final.
+    hf_push: str | None = "auto"
+    hf_private: bool = True
 
 
 @dataclass

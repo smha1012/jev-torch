@@ -215,6 +215,34 @@ metrics, and the final test / OOD metrics by kind and family, together with the 
 A resumed run continues the same W&B run. Without `WANDB_API_KEY` it logs offline (`wandb sync` later);
 set `train.wandb_project: null` to turn it off.
 
+### 🤗 Automatic Hub uploads
+
+If an HF token is available (`HF_TOKEN` in `.env.local`, an environment variable, or `hf auth login`),
+training pushes checkpoints to the Hub by itself:
+
+| When | What | Tag |
+|---|---|---|
+| end of every epoch | the current model (not yet calibrated) | `epoch-1`, `epoch-2`, … |
+| end of training | the best checkpoint, calibrated, with a model card containing the test / OOD metrics | `final` |
+
+```yaml
+train:
+  hf_push: auto          # default: <token account>/<output_dir name>, e.g. smha1012/jev-9b
+  # hf_push: myorg/jev-9b   explicit repo (a missing token or write access stops the run at startup)
+  # hf_push: null           never push
+  hf_private: true       # repos are created private by default
+```
+
+- 🛡️ Access is checked **before** data and weights are loaded: token, write permission on the namespace,
+  repo creation. A misconfiguration fails in seconds instead of after hours of training.
+- ⚠️ If the repo already holds files, the run warns that it will overwrite them (older versions stay in the
+  repo history). Use a different `hf_push` per run when you want to compare runs.
+- 🔁 A failed upload never stops training; it is reported in the log and training continues.
+- With `max_steps` shorter than one epoch (as in `jev-9b.yaml` / `jev-27b.yaml`), only the `final` push happens.
+- Load any version: `JEVPredictor("smha1012/jev-9b")` (latest) or `JEVPredictor("smha1012/jev-9b", revision="epoch-1")`.
+
+The token needs **write** access. Without a token, checkpoints simply stay in `runs/<name>/`.
+
 ### 📁 Outputs
 
 ```text
@@ -266,11 +294,13 @@ python -m jev.predict --ckpt smha1012/jev-9b --input my_questions.jsonl         
 python -m jev.predict --ckpt smha1012/jev-9b --input labeled.jsonl --metrics       # aggregate metrics
 ```
 
-### 🤗 Sharing a checkpoint
+### 🤗 Sharing a checkpoint manually
+
+Training uploads automatically (see [Automatic Hub uploads](#-automatic-hub-uploads)). To upload a
+checkpoint yourself:
 
 ```bash
-export HF_TOKEN=...   # or put it in .env.local on RunPod
-python -m jev.push_to_hub --ckpt runs/jev-9b/best --repo <you>/jev-9b [--private]
+python -m jev.push_to_hub --ckpt runs/jev-9b/best --repo <you>/jev-9b [--public] [--tag v1]
 ```
 
 This uploads the LoRA adapter, the decision head with its temperatures, and a generated **model card**
@@ -343,7 +373,9 @@ jev/
 ├── launch.py       # reads train.num_gpus, re-executes under torchrun
 ├── train.py        # training entry point
 ├── predict.py      # JEVPredictor + CLI (local or Hub checkpoints)
-└── push_to_hub.py  # upload a checkpoint with a generated model card
+├── push_to_hub.py  # model card + manual upload CLI
+├── hub.py          # automatic Hub uploads during training (access checks, epoch / final pushes)
+└── env.py          # loads .env.local
 configs/            # one YAML per experiment
 scripts/            # RunPod setup / train
 tests/              # fast unit tests (no downloads)

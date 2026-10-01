@@ -222,3 +222,122 @@ def test_model_card_includes_usage_and_metrics(tmp_path):
     assert 'JEVPredictor("someone/jev-9b")' in card
     assert "| test_set_30k / noul | 100 | 0.900 |" in card
     assert "choice 0.980" in card
+
+
+# -- Hub uploads -------------------------------------------------------------------
+
+
+def test_resolve_repo_rules():
+    from jev.hub import resolve_repo
+
+    assert resolve_repo(None, "me", [], "jev-9b") is None
+    assert resolve_repo("auto", "me", [], "jev-9b") == "me/jev-9b"
+    assert resolve_repo("myorg/x", "me", ["myorg"], "jev-9b") == "myorg/x"
+    with pytest.raises(ValueError):
+        resolve_repo("otherorg/x", "me", ["myorg"], "jev-9b")  # no write access
+    with pytest.raises(ValueError):
+        resolve_repo("not-a-repo-id", "me", [], "jev-9b")
+
+
+class FakeApi:
+    def __init__(self, files=(), fail_upload=False):
+        self.files, self.fail_upload, self.calls = list(files), fail_upload, []
+
+    def whoami(self):
+        return {"name": "me", "orgs": [{"name": "myorg"}]}
+
+    def create_repo(self, repo, private, exist_ok):
+        self.calls.append(("create_repo", repo, private))
+
+    def list_repo_files(self, repo):
+        return self.files
+
+    def upload_folder(self, repo_id, folder_path, allow_patterns, commit_message):
+        if self.fail_upload:
+            raise RuntimeError("network down")
+        import os
+
+        self.calls.append(("upload", repo_id, commit_message, sorted(os.listdir(folder_path))))
+        return type("Info", (), {"oid": "abc123"})()
+
+    def delete_tag(self, repo, tag):
+        raise RuntimeError("no such tag")
+
+    def create_tag(self, repo, tag, revision):
+        self.calls.append(("tag", tag, revision))
+
+
+@pytest.fixture
+def fake_hub(monkeypatch):
+    import huggingface_hub
+
+    api = FakeApi()
+    monkeypatch.setattr(huggingface_hub, "HfApi", lambda: api)
+    monkeypatch.setattr(huggingface_hub, "get_token", lambda: None)
+    return api
+
+
+def test_hub_setup_auto_skips_without_token(fake_hub, monkeypatch):
+    from jev.hub import HubUploader
+
+    monkeypatch.delenv("HF_TOKEN", raising=False)
+    assert HubUploader.setup("auto", True, "jev-9b") is None
+    with pytest.raises(SystemExit):  # an explicit target without a token stops the run
+        HubUploader.setup("me/jev-9b", True, "jev-9b")
+
+
+def test_hub_setup_checks_access_and_creates_private_repo(fake_hub, monkeypatch):
+    from jev.hub import HubUploader
+
+    monkeypatch.setenv("HF_TOKEN", "hf_x")
+    hub = HubUploader.setup("auto", True, "jev-9b")
+    assert hub.repo == "me/jev-9b" and ("create_repo", "me/jev-9b", True) in fake_hub.calls
+    with pytest.raises(SystemExit):
+        HubUploader.setup("strangers/jev", True, "jev-9b")
+
+
+def _fake_ckpt(tmp_path):
+    ckpt = tmp_path / "best"
+    (ckpt / "adapter").mkdir(parents=True)
+    for f in ("jev_config.json", "head.pt", "adapter/adapter_model.safetensors", "adapter/README.md"):
+        (ckpt / f).write_text("x")
+    return ckpt
+
+
+def test_hub_push_uploads_files_and_tags(fake_hub, monkeypatch, tmp_path):
+    from jev.hub import HubUploader
+
+    monkeypatch.setenv("HF_TOKEN", "hf_x")
+    hub = HubUploader.setup("auto", True, "jev-9b")
+    assert hub.push(_fake_ckpt(tmp_path), "# card", "epoch 1 (step 5)", tag="epoch-1")
+    upload = next(c for c in fake_hub.calls if c[0] == "upload")
+    assert upload[3] == ["README.md", "adapter", "head.pt", "jev_config.json"]
+    assert ("tag", "epoch-1", "abc123") in fake_hub.calls
+
+
+def test_hub_push_failure_does_not_raise(monkeypatch, tmp_path):
+    import huggingface_hub
+
+    from jev.hub import HubUploader
+
+    api = FakeApi(fail_upload=True)
+    monkeypatch.setattr(huggingface_hub, "HfApi", lambda: api)
+    monkeypatch.setenv("HF_TOKEN", "hf_x")
+    hub = HubUploader.setup("auto", True, "jev-9b")
+    assert hub.push(_fake_ckpt(tmp_path), "# card", "epoch 1") is False
+
+
+def test_load_env_does_not_override(tmp_path, monkeypatch):
+    from jev.env import load_env
+
+    f = tmp_path / ".env.local"
+    f.write_text("# comment\nHF_TOKEN=from_file\nWANDB_API_KEY=\nJEV_TEST_X='quoted'\n")
+    monkeypatch.setenv("HF_TOKEN", "from_env")
+    monkeypatch.delenv("WANDB_API_KEY", raising=False)
+    monkeypatch.delenv("JEV_TEST_X", raising=False)
+    load_env(f)
+    import os
+
+    assert os.environ["HF_TOKEN"] == "from_env"  # real environment wins
+    assert "WANDB_API_KEY" not in os.environ  # empty template line means unset
+    assert os.environ["JEV_TEST_X"] == "quoted"

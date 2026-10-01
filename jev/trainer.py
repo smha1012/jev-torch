@@ -10,6 +10,7 @@ import contextlib
 import json
 import math
 import random
+import shutil
 import time
 from pathlib import Path
 
@@ -22,6 +23,7 @@ from .config import JEVConfig
 from .distributed import DistContext
 from .losses import apply_temperatures, compute_metrics, fit_temperatures, jev_loss, metrics_by
 from .model import JEVModel
+from .push_to_hub import build_model_card
 from .schema import KINDS, JEVExample
 
 MAX_K = max(n for _, n in KIND_SLOTS.values())
@@ -95,7 +97,7 @@ def _fmt(m: dict) -> str:
 class Trainer:
     def __init__(self, cfg: JEVConfig, model: JEVModel, tokenizer, ctx: DistContext, dtype: torch.dtype,
                  train: list[JEVExample], val: list[JEVExample], calib: list[JEVExample] | None = None,
-                 evals: dict[str, list[JEVExample]] | None = None):
+                 evals: dict[str, list[JEVExample]] | None = None, hub=None):
         self.cfg, self.tc = cfg, cfg.train
         self.model, self.tokenizer, self.ctx = model, tokenizer, ctx
         self.train_ex, self.val_ex, self.calib_ex, self.evals = train, val, calib, evals or {}
@@ -105,6 +107,7 @@ class Trainer:
         self.use_autocast = ctx.device.type == "cuda" and dtype == torch.bfloat16
         self.history: list[dict] = []
         self.wandb = None
+        self.hub = hub  # HubUploader on rank 0 when pushing is enabled, else None
 
     # -- helpers ------------------------------------------------------------------------
 
@@ -178,6 +181,22 @@ class Trainer:
             torch.save({"optimizer": optimizer.state_dict(), "scheduler": scheduler.state_dict(),
                         "history": self.history, "python_rng": random.getstate(), **state},
                        self.out / name / "trainer_state.pt")
+        self.ctx.barrier()
+
+    # -- Hub ------------------------------------------------------------------------------
+
+    def push_epoch(self, epoch: int, step: int):
+        """Upload the model as it is at the end of an epoch (uncalibrated), tagged epoch-N."""
+        if self.hub is not None and self.ctx.is_main:
+            snap = self.out / "epoch_snapshot"
+            self.model.save(snap)
+            val = self.history[-1] if self.history else {}
+            metrics = f" Latest validation: top-1 {val['acc']:.3f}, KL {val['kl']:.4f}." if "acc" in val else ""
+            status = (f"Intermediate checkpoint after epoch {epoch + 1} (step {step}), not calibrated yet."
+                      f"{metrics} The final calibrated model is tagged `final`.")
+            self.hub.push(snap, build_model_card(snap, self.hub.repo, status),
+                          f"epoch {epoch + 1} (step {step})", tag=f"epoch-{epoch + 1}")
+            shutil.rmtree(snap, ignore_errors=True)
         self.ctx.barrier()
 
     # -- training -------------------------------------------------------------------------
@@ -316,6 +335,8 @@ class Trainer:
                 if step >= total_steps:
                     done = True
                     break
+            if micro >= len(sampler):  # this epoch ran to its end
+                self.push_epoch(epoch, step)
 
         if not self.history or self.history[-1]["step"] != step:
             validate()
@@ -356,7 +377,14 @@ class Trainer:
         if ctx.is_main:
             (self.out / "report.json").write_text(json.dumps(report, indent=2))
             ctx.print(f"report -> {self.out / 'report.json'}")
+            if self.hub is not None:
+                pushed = self.hub.push(best, build_model_card(best, self.hub.repo),
+                                       "final: calibrated best checkpoint", tag="final")
+                report["hub_repo"] = self.hub.repo if pushed else None
+                (self.out / "report.json").write_text(json.dumps(report, indent=2))
             if self.wandb:
+                if report.get("hub_repo"):
+                    self.wandb.summary["hub_repo"] = f"https://huggingface.co/{report['hub_repo']}"
                 self.wandb.summary.update(_flatten({k: v for k, v in report.items() if k != "val_history"}))
                 self.wandb.save(str(self.out / "report.json"), base_path=str(self.out), policy="now")
                 self.wandb.finish()

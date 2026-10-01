@@ -1,10 +1,11 @@
 """Upload a trained checkpoint to the Hugging Face Hub with a generated model card.
 
-    python -m jev.push_to_hub --ckpt runs/jev-9b/best --repo smha1012/jev-9b
-    python -m jev.push_to_hub --ckpt runs/jev-9b/best --repo smha1012/jev-9b --private
+    python -m jev.push_to_hub --ckpt runs/jev-9b/best --repo smha1012/jev-9b            # private
+    python -m jev.push_to_hub --ckpt runs/jev-9b/best --repo smha1012/jev-9b --public
     python -m jev.push_to_hub --ckpt runs/jev-9b/best --repo smha1012/jev-9b --dry_run out/   # write card only
 
-The token comes from HF_TOKEN (or `hf auth login`). The card pulls training settings from
+Training already pushes automatically (train.hf_push); this command is for manual uploads.
+The token comes from HF_TOKEN, .env.local, or `hf auth login`. The card pulls training settings from
 <run>/config.yaml and metrics from <run>/report.json when they exist next to the checkpoint.
 Afterwards anyone can run:  JEVPredictor("smha1012/jev-9b")
 """
@@ -13,13 +14,12 @@ from __future__ import annotations
 
 import argparse
 import json
-import shutil
-import tempfile
 from pathlib import Path
 
 import yaml
 
-from .model import CHECKPOINT_FILES
+from .env import load_env
+from .hub import HubUploader, stage_checkpoint
 
 
 def _metrics_table(report: dict) -> str:
@@ -37,7 +37,8 @@ def _metrics_table(report: dict) -> str:
     return "\n".join(lines)
 
 
-def build_model_card(ckpt: Path, repo_id: str) -> str:
+def build_model_card(ckpt: Path, repo_id: str, status: str | None = None) -> str:
+    """Model card for a checkpoint. `status` marks an intermediate (e.g. per-epoch) upload."""
     meta = json.loads((ckpt / "jev_config.json").read_text())
     base = meta["model"]["name"]
     run_dir = ckpt.parent
@@ -69,9 +70,10 @@ def build_model_card(ckpt: Path, repo_id: str) -> str:
     if temps:
         settings.append("- **Temperatures:** " + ", ".join(f"{k} {v:.3f}" for k, v in temps.items()))
 
+    status_block = f"\n> [!NOTE]\n> {status}\n" if status else ""
     body = f"""
 # {repo_id.split('/')[-1]}
-
+{status_block}
 An **unofficial JEV-style decision model** trained with [jev-torch](https://github.com/smha1012/jev-torch).
 It reads a *state*, a *question* and a list of *options*, runs one forward pass, and returns a
 calibrated probability for every option.
@@ -125,34 +127,24 @@ def main():
     p = argparse.ArgumentParser()
     p.add_argument("--ckpt", required=True, help="checkpoint directory, e.g. runs/jev-9b/best")
     p.add_argument("--repo", required=True, help="Hub repo id, e.g. smha1012/jev-9b")
-    p.add_argument("--private", action="store_true")
+    p.add_argument("--public", action="store_true", help="create the repo public (default: private)")
+    p.add_argument("--tag", help="also tag this upload, e.g. v1")
     p.add_argument("--dry_run", metavar="DIR", help="write the staged upload to DIR instead of uploading")
     args = p.parse_args()
 
     ckpt = Path(args.ckpt)
     if not (ckpt / "jev_config.json").exists():
         raise SystemExit(f"{ckpt} is not a jev-torch checkpoint")
+    card = build_model_card(ckpt, args.repo)
+    if args.dry_run:
+        stage_checkpoint(ckpt, Path(args.dry_run), card)
+        print(f"staged upload in {args.dry_run}")
+        return
 
-    with tempfile.TemporaryDirectory() as tmp:
-        stage = Path(args.dry_run) if args.dry_run else Path(tmp)
-        stage.mkdir(parents=True, exist_ok=True)
-        shutil.copy(ckpt / "jev_config.json", stage)
-        shutil.copy(ckpt / "head.pt", stage)
-        shutil.copytree(ckpt / "adapter", stage / "adapter", dirs_exist_ok=True)
-        (stage / "adapter" / "README.md").unlink(missing_ok=True)  # PEFT's empty template card
-        (stage / "README.md").write_text(build_model_card(ckpt, args.repo))
-        if args.dry_run:
-            print(f"staged upload in {stage}")
-            return
-
-        from huggingface_hub import HfApi
-
-        api = HfApi()
-        api.create_repo(args.repo, private=args.private, exist_ok=True)
-        api.upload_folder(repo_id=args.repo, folder_path=str(stage),
-                          allow_patterns=[*CHECKPOINT_FILES, "README.md"],
-                          commit_message="Upload jev-torch checkpoint")
-        print(f"uploaded -> https://huggingface.co/{args.repo}")
+    load_env()
+    hub = HubUploader.setup(args.repo, private=not args.public, run_name=ckpt.parent.name)
+    if not hub.push(ckpt, card, "Upload jev-torch checkpoint", tag=args.tag):
+        raise SystemExit(1)
 
 
 if __name__ == "__main__":
