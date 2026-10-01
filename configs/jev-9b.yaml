@@ -23,6 +23,9 @@ train:
   output_dir: runs/jev-9b
   num_gpus: 1
   wandb_project: jev-torch
+  # Checkpoints go here (every epoch end + final). The RunPod HF_TOKEN must be a WRITE token of the
+  # seungminh account; otherwise the run stops at startup with a clear message.
+  hf_push: seungminh/jev-9b
   global_batch_size: 128
   micro_batch_size: 16
   max_steps: 4750
