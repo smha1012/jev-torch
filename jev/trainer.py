@@ -24,6 +24,7 @@ from .distributed import DistContext
 from .losses import JEVLoss, apply_temperatures, compute_metrics, fit_temperatures, metrics_by
 from .model import JEVModel
 from .push_to_hub import build_model_card
+from .report import format_comparison, teacher_block
 from .schema import KINDS, JEVExample
 
 MAX_K = max(n for _, n in KIND_SLOTS.values())
@@ -371,14 +372,20 @@ class Trainer:
             cal_logits = apply_temperatures(res["logits"], res["kind"], temps)
             cal = compute_metrics(**{**res, "logits": cal_logits})
             cal["by_kind"] = metrics_by({**res, "logits": cal_logits}, [KINDS[k] for k in res["kind"].tolist()])
-            families = [ex.get("family") for ex in examples]
-            if any(f is not None for f in families):
-                cal["by_family"] = metrics_by({**res, "logits": cal_logits}, families)
+            for field_name in ("family", "source"):
+                values = [ex.get(field_name) for ex in examples]
+                if any(v is not None for v in values):
+                    cal[f"by_{field_name}"] = metrics_by({**res, "logits": cal_logits}, values)
             report[name] = {"uncalibrated": raw, "calibrated": cal}
+            vs = teacher_block({**res, "logits": cal_logits}, examples, self.cfg.data.teacher_sources)
+            if vs:
+                report[name]["vs_teacher"] = vs
             ctx.print(f"{name} uncalibrated {_fmt(raw)}")
             ctx.print(f"{name} calibrated   {_fmt(cal)}")
             for k, m in cal["by_kind"].items():
                 ctx.print(f"  {name}/{k:6s} {_fmt(m)}")
+            if vs:
+                ctx.print(format_comparison(vs, name))
 
         if ctx.is_main:
             (self.out / "report.json").write_text(json.dumps(report, indent=2))

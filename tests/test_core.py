@@ -425,3 +425,25 @@ def test_custom_loss_registration():
 def test_loss_override_from_cli():
     cfg = load_config("configs/jev-9b.yaml", ["train.loss={kl: 1.0, brier: 0.25}"])
     assert JEVLoss(cfg.train.loss).describe() == "1·kl + 0.25·brier"
+
+
+def test_teacher_block_uses_teacher_rows_only():
+    from jev.report import format_comparison, teacher_block
+
+    exs = [JEVExample(state="", question="q", options=["a", "b"], kind="choice", target=[0.9, 0.1],
+                      meta={"source": "yuri_v3"}),
+           JEVExample(state="", question="q", options=["a", "b"], kind="choice", label=1,
+                      meta={"source": "openjev_v2"}),
+           JEVExample(state="", question="q", options=["false", "true"], kind="noul", target=[0.2, 0.8],
+                      meta={"source": "yuri_v3"})]
+    res = {"logits": torch.tensor([[2.0, 0.0], [2.0, 0.0], [0.0, 2.0]]),
+           "target": torch.tensor([e.target_dist() for e in exs]),
+           "option_mask": torch.ones(3, 2, dtype=torch.bool),
+           "label": torch.tensor([e.label for e in exs]),
+           "kind": torch.tensor([KINDS.index(e.kind) for e in exs])}
+    block = teacher_block(res, exs, ["yuri_v3"])
+    assert block["n"] == 2 and block["acc"] == 1.0              # the openjev row (a miss) is excluded
+    assert block["choice_acc_all_rows"] == 0.5                  # ...but counted for all choice rows
+    assert set(block["by_kind"]) == {"choice", "noul"}
+    assert "JEV-9B" in format_comparison(block, "test_set_30k")
+    assert teacher_block(res, exs, []) is None

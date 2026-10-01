@@ -377,6 +377,7 @@ score, and **confidence-threshold routing**. From the shell:
 python examples/inference.py --model your-name/jev-9b
 python -m jev.predict --ckpt your-name/jev-9b --input questions.jsonl
 python -m jev.predict --ckpt your-name/jev-9b --input labeled.jsonl --metrics
+python -m jev.evaluate --model your-name/jev-9b                              # compare with TypeSafe Jev
 python -m jev.push_to_hub --ckpt runs/jev-9b/best --repo your-name/jev-9b    # manual upload
 ```
 
@@ -479,6 +480,8 @@ jev/
 ├── hub.py          # automatic Hub uploads
 ├── launch.py       # reads train.num_gpus, re-executes under torchrun
 ├── train.py        # training entry point
+├── evaluate.py     # compare a checkpoint with the teacher and the autotrust references
+├── report.py       # teacher-row metrics and the comparison table
 ├── predict.py      # JEVPredictor + CLI
 ├── push_to_hub.py  # model card + manual upload
 └── env.py          # .env.local and JEV_OVERRIDES

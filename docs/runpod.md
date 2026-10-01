@@ -256,6 +256,25 @@ Hub: pushed 'final: calibrated best checkpoint' -> https://huggingface.co/your-n
 report -> runs/jev-9b/report.json
 ```
 
+**How close is it to TypeSafe Jev?** The end of the log prints a comparison on the 25,376 Jev-labelled
+rows of `test_set_30k`, the same rows autotrust reports on:
+
+```text
+vs teacher on test_set_30k (25,376 teacher-labelled rows):
+  metric                                      this model    JEV-9B   JEV-27B
+  mean KL to teacher (lower is better)            0.0xxx    0.0190    0.0170
+  choice top-1 agreement, teacher rows             xx.x%     90.2%         -
+  choice top-1 agreement, all choice rows          xx.x%     89.8%     90.3%
+  ECE                                             0.0xxx    0.0007    0.0009
+```
+
+The same block is stored under `vs_teacher` in `report.json`. To recompute it later, for any checkpoint or
+Hub model:
+
+```bash
+python3 -m jev.evaluate --model runs/jev-9b/best
+```
+
 **Results:** `runs/jev-9b/report.json` has the test and OOD metrics, before and after calibration, by kind
 and by domain family. A readable summary:
 
@@ -321,6 +340,7 @@ you are ready.
 | GPU usage | `watch -n 5 nvidia-smi` |
 | Disk space | `df -h /workspace` and `du -sh /workspace/hf_cache runs/*` |
 | Remove an old run | `rm -rf runs/<old-run>` (local only; its Hub repo is untouched) |
+| Compare a model with TypeSafe Jev | `python3 -m jev.evaluate --model runs/jev-9b/best` |
 | Score your own questions | `python3 -m jev.predict --ckpt runs/jev-9b/best --input my.jsonl` |
 | Evaluate on labeled data | `python3 -m jev.predict --ckpt runs/jev-9b/best --input labeled.jsonl --metrics` |
 | Upload a checkpoint by hand | `python3 -m jev.push_to_hub --ckpt runs/jev-9b/best --repo your-name/jev-9b` |

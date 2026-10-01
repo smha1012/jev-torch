@@ -48,6 +48,9 @@ class DataConfig:
     shuffle_prob: float = 0.3  # chance of permuting a `choice` row's options (targets follow)
     # Per-row loss weight by field value, e.g. {source: {yuri_v1: 0.1}}. Rows not matched weigh 1.0.
     loss_weights: dict[str, dict[str, float]] = field(default_factory=dict)
+    # Rows labelled by the teacher model (`source` field); the report compares the model with the
+    # teacher on these rows. In the JEV corpus: yuri_v3 = TypeSafe Jev 1.13 distributions.
+    teacher_sources: list[str] = field(default_factory=lambda: ["yuri_v3"])
 
 
 @dataclass
