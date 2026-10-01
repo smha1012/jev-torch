@@ -181,3 +181,44 @@ def test_loss_weights_downweight_rows():
     full = jev_loss(logits, b["target"], b["option_mask"], b["kind"], 0.0)
     weighted = jev_loss(logits, b["target"], b["option_mask"], b["kind"], 0.0, b["weight"])
     assert weighted < full
+
+
+# -- hub / checkpoints -----------------------------------------------------------
+
+
+def test_resolve_checkpoint_local_and_errors(tmp_path):
+    from jev.model import resolve_checkpoint
+
+    ckpt = tmp_path / "best"
+    ckpt.mkdir()
+    with pytest.raises(FileNotFoundError):  # a directory without jev_config.json
+        resolve_checkpoint(ckpt)
+    (ckpt / "jev_config.json").write_text("{}")
+    assert resolve_checkpoint(ckpt) == ckpt
+    with pytest.raises(FileNotFoundError):  # neither a directory nor "owner/name"
+        resolve_checkpoint(tmp_path / "missing" / "deep" / "path")
+
+
+def test_model_card_includes_usage_and_metrics(tmp_path):
+    import json
+
+    import yaml
+
+    from jev.push_to_hub import build_model_card
+
+    run = tmp_path / "run"
+    ckpt = run / "best"
+    ckpt.mkdir(parents=True)
+    (ckpt / "jev_config.json").write_text(json.dumps({
+        "model": {"name": "Qwen/Qwen3.5-9B", "lora_r": 16, "lora_alpha": 32},
+        "temperature": {"noul": 1.0, "choice": 0.98, "score": 1.01}}))
+    (run / "config.yaml").write_text(yaml.safe_dump({"train": {"max_steps": 4750, "global_batch_size": 128,
+                                                               "lr": 1e-4, "head_lr": 2e-4}}))
+    m = {"n": 100, "acc": 0.9, "kl": 0.02, "ece": 0.001}
+    (run / "report.json").write_text(json.dumps({"test_set_30k": {"calibrated": {**m, "by_kind": {"noul": m}}}}))
+    card = build_model_card(ckpt, "someone/jev-9b")
+    front = yaml.safe_load(card.split("---")[1])
+    assert front["base_model"] == "Qwen/Qwen3.5-9B" and "jev" in front["tags"]
+    assert 'JEVPredictor("someone/jev-9b")' in card
+    assert "| test_set_30k / noul | 100 | 0.900 |" in card
+    assert "choice 0.980" in card

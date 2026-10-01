@@ -236,10 +236,12 @@ runs/jev-9b/
 
 ## 🔮 Inference
 
+Load a checkpoint from the 🤗 Hub by repo id, or from a local run directory:
+
 ```python
 from jev import JEVPredictor
 
-jev = JEVPredictor("runs/jev-9b/best")
+jev = JEVPredictor("smha1012/jev-9b")        # or JEVPredictor("runs/jev-9b/best")
 
 jev.predict(
     kind="noul",
@@ -247,15 +249,33 @@ jev.predict(
     question="Should the rollout be paused?",
     options=["false", "true"],
 )
-# {'false': 0.08, 'true': 0.92}   (illustrative)
+# -> {'false': ..., 'true': ...}   one calibrated probability per option
+```
+
+[`examples/inference.py`](examples/inference.py) walks through all three question kinds, batch scoring, the
+expected value of a `score`, and **confidence-threshold routing** (act when p ≥ 0.85, otherwise escalate):
+
+```bash
+python examples/inference.py --model smha1012/jev-9b
 ```
 
 From the command line:
 
 ```bash
-python -m jev.predict --ckpt runs/jev-9b/best --input my_questions.jsonl            # per-example probabilities
-python -m jev.predict --ckpt runs/jev-9b/best --input labeled.jsonl --metrics       # aggregate metrics
+python -m jev.predict --ckpt smha1012/jev-9b --input my_questions.jsonl            # per-example probabilities
+python -m jev.predict --ckpt smha1012/jev-9b --input labeled.jsonl --metrics       # aggregate metrics
 ```
+
+### 🤗 Sharing a checkpoint
+
+```bash
+export HF_TOKEN=...   # or put it in .env.local on RunPod
+python -m jev.push_to_hub --ckpt runs/jev-9b/best --repo <you>/jev-9b [--private]
+```
+
+This uploads the LoRA adapter, the decision head with its temperatures, and a generated **model card**
+(base model, training settings and the `test_set_30k` / OOD metrics from `report.json`). Use `--dry_run DIR`
+to preview the card without uploading.
 
 ## 🧩 Extending
 
@@ -322,7 +342,8 @@ jev/
 ├── trainer.py      # Trainer: DDP, sharded eval, checkpoint/resume, calibration, W&B
 ├── launch.py       # reads train.num_gpus, re-executes under torchrun
 ├── train.py        # training entry point
-└── predict.py      # JEVPredictor + CLI
+├── predict.py      # JEVPredictor + CLI (local or Hub checkpoints)
+└── push_to_hub.py  # upload a checkpoint with a generated model card
 configs/            # one YAML per experiment
 scripts/            # RunPod setup / train
 tests/              # fast unit tests (no downloads)
@@ -336,7 +357,7 @@ tests/              # fast unit tests (no downloads)
 - [ ] End-to-end validation on multi-GPU CUDA
 - [ ] Publish our own trained checkpoints and `test_set_30k` results
 - [ ] Kind-stratified batches and token-budget micro-batches (as in JEV-9B)
-- [ ] Push checkpoints to the Hugging Face Hub
+- [x] Load from / push to the Hugging Face Hub with a generated model card
 - [ ] FSDP for backbones that do not fit on one GPU
 
 Contributions are welcome. Please open an issue first for larger changes, and run `pytest -q` before sending

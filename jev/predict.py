@@ -6,7 +6,7 @@ CLI:
 
 Python:
     from jev import JEVPredictor
-    jev = JEVPredictor("runs/jev-9b/best")
+    jev = JEVPredictor("smha1012/jev-9b")      # Hub repo id, or a local runs/<name>/best
     jev.predict(kind="choice", state="...", question="Root cause?", options=["a", "b", "c"])
     # -> {"a": 0.71, "b": 0.22, "c": 0.07}
 """
@@ -26,11 +26,18 @@ from .schema import JEVExample
 
 
 class JEVPredictor:
-    def __init__(self, ckpt: str, device: str = "auto", max_length: int = 1024, batch_size: int = 16):
+    """Load a trained JEV model and score options.
+
+    `ckpt` is a local checkpoint directory (runs/<name>/best) or a Hugging Face Hub repo id
+    (e.g. "smha1012/jev-9b"); Hub checkpoints are downloaded once and cached.
+    """
+
+    def __init__(self, ckpt: str, device: str = "auto", max_length: int = 1024, batch_size: int = 16,
+                 revision: str | None = None):
         self.device = pick_device(device)
         dtype = pick_dtype(self.device)
         device_map = {"": self.device.index or 0} if self.device.type == "cuda" else None
-        self.model, self.tokenizer = JEVModel.load(ckpt, dtype=dtype, device_map=device_map)
+        self.model, self.tokenizer = JEVModel.load(ckpt, dtype=dtype, device_map=device_map, revision=revision)
         self.model.to(self.device).eval()
         self.autocast = self.device.type == "cuda" and dtype == torch.bfloat16
         self.collator = JEVCollator(self.tokenizer, max_length=max_length)
@@ -76,7 +83,7 @@ def _read(path: str) -> list[JEVExample]:
 
 def main():
     p = argparse.ArgumentParser()
-    p.add_argument("--ckpt", required=True)
+    p.add_argument("--ckpt", required=True, help="checkpoint directory or Hugging Face Hub repo id")
     p.add_argument("--input", required=True, help="JSONL in the JEV format")
     p.add_argument("--metrics", action="store_true", help="aggregate metrics (needs target/label)")
     p.add_argument("--batch_size", type=int, default=16)

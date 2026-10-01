@@ -1,0 +1,159 @@
+"""Upload a trained checkpoint to the Hugging Face Hub with a generated model card.
+
+    python -m jev.push_to_hub --ckpt runs/jev-9b/best --repo smha1012/jev-9b
+    python -m jev.push_to_hub --ckpt runs/jev-9b/best --repo smha1012/jev-9b --private
+    python -m jev.push_to_hub --ckpt runs/jev-9b/best --repo smha1012/jev-9b --dry_run out/   # write card only
+
+The token comes from HF_TOKEN (or `hf auth login`). The card pulls training settings from
+<run>/config.yaml and metrics from <run>/report.json when they exist next to the checkpoint.
+Afterwards anyone can run:  JEVPredictor("smha1012/jev-9b")
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import shutil
+import tempfile
+from pathlib import Path
+
+import yaml
+
+from .model import CHECKPOINT_FILES
+
+
+def _metrics_table(report: dict) -> str:
+    rows = []
+    for split in ("test_set_30k", "ood"):
+        cal = report.get(split, {}).get("calibrated")
+        if not cal:
+            continue
+        rows.append((f"{split} (all)", cal))
+        rows += [(f"{split} / {k}", m) for k, m in cal.get("by_kind", {}).items()]
+    if not rows:
+        return ""
+    lines = ["| split | n | top-1 agreement | KL to teacher | ECE |", "|---|---:|---:|---:|---:|"]
+    lines += [f"| {name} | {m['n']:,} | {m['acc']:.3f} | {m['kl']:.4f} | {m['ece']:.4f} |" for name, m in rows]
+    return "\n".join(lines)
+
+
+def build_model_card(ckpt: Path, repo_id: str) -> str:
+    meta = json.loads((ckpt / "jev_config.json").read_text())
+    base = meta["model"]["name"]
+    run_dir = ckpt.parent
+    config = yaml.safe_load((run_dir / "config.yaml").read_text()) if (run_dir / "config.yaml").exists() else {}
+    report = json.loads((run_dir / "report.json").read_text()) if (run_dir / "report.json").exists() else {}
+    train = config.get("train", {})
+    data = config.get("data", {})
+    temps = meta.get("temperature", {})
+
+    front = {
+        "license": "apache-2.0",
+        "base_model": base,
+        "library_name": "peft",
+        "pipeline_tag": "text-classification",
+        "tags": ["jev", "jev-torch", "decision-model", "calibration", "lora", "distillation"],
+    }
+    if data.get("source", "jev_distill") == "jev_distill":
+        front["datasets"] = ["SargeDev/jev-distill-corpus-v3"]
+
+    metrics = _metrics_table(report)
+    settings = [
+        f"- **Base model:** [`{base}`](https://huggingface.co/{base}) (frozen) + LoRA r={meta['model']['lora_r']}, "
+        f"α={meta['model']['lora_alpha']} + 24-slot fp32 decision head",
+        f"- **Loss:** KL to the teacher distribution + {train.get('rps_weight', 0.5)} · RPS on `score` rows",
+    ]
+    if train:
+        settings.append(f"- **Optimization:** {train.get('max_steps') or '1 epoch'} steps × "
+                        f"{train.get('global_batch_size')} rows, LoRA lr {train.get('lr')}, head lr {train.get('head_lr')}")
+    if temps:
+        settings.append("- **Temperatures:** " + ", ".join(f"{k} {v:.3f}" for k, v in temps.items()))
+
+    body = f"""
+# {repo_id.split('/')[-1]}
+
+An **unofficial JEV-style decision model** trained with [jev-torch](https://github.com/smha1012/jev-torch).
+It reads a *state*, a *question* and a list of *options*, runs one forward pass, and returns a
+calibrated probability for every option.
+
+## Usage
+
+```bash
+pip install git+https://github.com/smha1012/jev-torch.git
+```
+
+```python
+from jev import JEVPredictor
+
+jev = JEVPredictor("{repo_id}")
+jev.predict(
+    kind="noul",
+    state="The canary shows p99 latency up 40% after the deploy.",
+    question="Should the rollout be paused?",
+    options=["false", "true"],
+)
+```
+
+Question kinds: `noul` (exactly 2 options, false-like then true-like), `choice` (2–16 options),
+`score` (ordered levels 0–5).
+
+## Training
+
+{chr(10).join(settings)}
+
+## Evaluation
+
+{metrics or "_No evaluation report was found next to this checkpoint._"}
+
+`top-1 agreement` = how often the model's top option matches the teacher's top option.
+
+## Limitations
+
+- Probabilities mirror the teacher model's judgments; they are not ground truth.
+- Trained mostly on synthetic English scenarios; validate on your own domain before relying on it.
+
+## License and attribution
+
+Weights: Apache-2.0. The training corpus is Apache-2.0, but part of its labels are outputs of the closed
+TypeSafe Jev 1.13 model; check that model's terms before commercial use.
+This is an independent project, not affiliated with TypeSafe AI or autotrust.
+"""
+    return "---\n" + yaml.safe_dump(front, sort_keys=False) + "---\n" + body
+
+
+def main():
+    p = argparse.ArgumentParser()
+    p.add_argument("--ckpt", required=True, help="checkpoint directory, e.g. runs/jev-9b/best")
+    p.add_argument("--repo", required=True, help="Hub repo id, e.g. smha1012/jev-9b")
+    p.add_argument("--private", action="store_true")
+    p.add_argument("--dry_run", metavar="DIR", help="write the staged upload to DIR instead of uploading")
+    args = p.parse_args()
+
+    ckpt = Path(args.ckpt)
+    if not (ckpt / "jev_config.json").exists():
+        raise SystemExit(f"{ckpt} is not a jev-torch checkpoint")
+
+    with tempfile.TemporaryDirectory() as tmp:
+        stage = Path(args.dry_run) if args.dry_run else Path(tmp)
+        stage.mkdir(parents=True, exist_ok=True)
+        shutil.copy(ckpt / "jev_config.json", stage)
+        shutil.copy(ckpt / "head.pt", stage)
+        shutil.copytree(ckpt / "adapter", stage / "adapter", dirs_exist_ok=True)
+        (stage / "adapter" / "README.md").unlink(missing_ok=True)  # PEFT's empty template card
+        (stage / "README.md").write_text(build_model_card(ckpt, args.repo))
+        if args.dry_run:
+            print(f"staged upload in {stage}")
+            return
+
+        from huggingface_hub import HfApi
+
+        api = HfApi()
+        api.create_repo(args.repo, private=args.private, exist_ok=True)
+        api.upload_folder(repo_id=args.repo, folder_path=str(stage),
+                          allow_patterns=[*CHECKPOINT_FILES, "README.md"],
+                          commit_message="Upload jev-torch checkpoint")
+        print(f"uploaded -> https://huggingface.co/{args.repo}")
+
+
+if __name__ == "__main__":
+    main()

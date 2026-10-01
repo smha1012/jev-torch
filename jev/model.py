@@ -94,10 +94,11 @@ class JEVModel(nn.Module):
 
     @classmethod
     def load(cls, ckpt_dir: str | Path, dtype: torch.dtype = torch.float32, device_map=None,
-             is_trainable: bool = False):
-        """Load a saved checkpoint. `is_trainable=True` keeps LoRA trainable, e.g. to continue
+             is_trainable: bool = False, revision: str | None = None):
+        """Load a checkpoint from a local directory or a Hugging Face Hub repo id
+        (e.g. "smha1012/jev-9b"). `is_trainable=True` keeps LoRA trainable, e.g. to continue
         training or to fine-tune the general model on new data with the same Trainer."""
-        ckpt = Path(ckpt_dir)
+        ckpt = resolve_checkpoint(ckpt_dir, revision)
         meta = json.loads((ckpt / "jev_config.json").read_text())
         cfg = ModelConfig(**meta["model"])
         tokenizer = load_tokenizer(cfg.name)
@@ -141,6 +142,23 @@ class JEVModel(nn.Module):
         path = Path(ckpt_dir) / "adapter" / "adapter_model.safetensors"
         set_peft_model_state_dict(self.backbone, load_file(str(path)))
         self.load_head(ckpt_dir)
+
+
+CHECKPOINT_FILES = ["jev_config.json", "head.pt", "adapter/*"]
+
+
+def resolve_checkpoint(path_or_repo: str | Path, revision: str | None = None) -> Path:
+    """Local checkpoint directory as-is; otherwise download the checkpoint files from the Hub."""
+    path = Path(path_or_repo)
+    if path.is_dir():
+        if not (path / "jev_config.json").exists():
+            raise FileNotFoundError(f"{path} is not a jev-torch checkpoint (no jev_config.json)")
+        return path
+    if path.exists() or str(path_or_repo).count("/") != 1:
+        raise FileNotFoundError(f"{path_or_repo!r} is neither a checkpoint directory nor a Hub repo id")
+    from huggingface_hub import snapshot_download
+
+    return Path(snapshot_download(str(path_or_repo), revision=revision, allow_patterns=CHECKPOINT_FILES))
 
 
 def load_tokenizer(name: str):
