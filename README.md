@@ -247,10 +247,10 @@ the network volume (`/workspace`) so checkpoints and caches survive restarts.
 **① Configure**
 
 ```bash
-read -rsp "HF_TOKEN: " T \
- && echo "HF_TOKEN=$T" > .env.local
+echo "HF_TOKEN=hf_..." > .env.local
+echo "WANDB_API_KEY=..." >> .env.local
 ```
-<sub>add <code>WANDB_API_KEY</code> the same way (optional)</sub>
+<sub><code>WANDB_API_KEY</code> is optional</sub>
 
 </td>
 <td width="33%" valign="top">

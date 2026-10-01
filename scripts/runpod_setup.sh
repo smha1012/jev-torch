@@ -4,7 +4,7 @@
 #   Image: runpod/pytorch:1.0.2-cu1281-torch280-ubuntu2404  (torch 2.8.0 · CUDA 12.8.1 · Ubuntu 24.04)
 #
 #   cd /workspace && git clone https://github.com/smha1012/jev-torch.git && cd jev-torch
-#   read -rsp "HF_TOKEN: " T && echo "HF_TOKEN=$T" > .env.local    # tokens, typed hidden (see docs/runpod.md)
+#   echo "HF_TOKEN=hf_..." > .env.local && echo "WANDB_API_KEY=..." >> .env.local
 #   bash scripts/runpod_setup.sh                       # install + checks + GPU smoke test
 #   bash scripts/runpod_setup.sh configs/jev-9b.yaml   # ... and pre-download that run's model
 #

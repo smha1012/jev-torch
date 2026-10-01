@@ -85,12 +85,9 @@ Already cloned on this volume? Update instead: `cd /workspace/jev-torch && git p
 
 ## 4. Add your tokens
 
-No editor needed. The tokens are typed hidden and do not end up in your shell history:
-
 ```bash
-read -rsp "HF_TOKEN: " T && echo "HF_TOKEN=$T" > .env.local && echo
-read -rsp "WANDB_API_KEY (Enter to skip): " W && echo "WANDB_API_KEY=$W" >> .env.local && echo
-sed 's/=.*/=***/' .env.local      # check which keys are set, values masked
+echo "HF_TOKEN=hf_your_token" > .env.local
+echo "WANDB_API_KEY=your_key" >> .env.local      # optional
 ```
 
 | Key | |
@@ -356,8 +353,8 @@ Full logs: training in `runs/<name>/train.log`, smoke test in `/tmp/jev-smoke.lo
 ```bash
 # once per pod
 cd /workspace && git clone https://github.com/smha1012/jev-torch.git && cd jev-torch
-read -rsp "HF_TOKEN: " T && echo "HF_TOKEN=$T" > .env.local && echo
-read -rsp "WANDB_API_KEY (Enter to skip): " W && echo "WANDB_API_KEY=$W" >> .env.local && echo
+echo "HF_TOKEN=hf_your_token" > .env.local
+echo "WANDB_API_KEY=your_key" >> .env.local      # optional
 bash scripts/runpod_setup.sh configs/jev-9b.yaml
 
 # after a pod restart (packages are gone, /workspace is kept)
