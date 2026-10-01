@@ -1,0 +1,14 @@
+# Qwen3.5-2B (1.9B backbone, 15.6M LoRA): cheap full run for iterating on the recipe.
+# Memory (estimate): ~10 GB -> any 24 GB+ GPU.
+model:
+  name: Qwen/Qwen3.5-2B
+data:
+  # autotrust down-weights yuri_v1 (148k placeholder labels); 0.1 is our choice, the exact value is unpublished.
+  loss_weights: {source: {yuri_v1: 0.1}}
+train:
+  output_dir: runs/jev-2b
+  num_gpus: 1
+  wandb_project: jev-torch
+  global_batch_size: 128
+  micro_batch_size: 16
+  max_steps: 5000

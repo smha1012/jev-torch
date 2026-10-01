@@ -1,0 +1,21 @@
+# Qwen3.5-27B (25.6B backbone, 108.8M LoRA; matches autotrust/JEV-27B exactly), bf16.
+#
+# Measured by autotrust: 1x B200, 5,000 steps, ~9.2 h, ~2.4k tok/s, peak 79 GB
+# (their micro-batches held up to 24k padded tokens).
+# Memory (our estimate): weights 48 GB + activations. micro_batch_size 8 (<= 8k tokens) ~60 GB,
+# so one 80 GB GPU (H100/A100) fits. More GPUs only make it faster (data parallel, full copy per GPU).
+model:
+  name: Qwen/Qwen3.5-27B
+  gradient_checkpointing: true
+data:
+  # autotrust down-weights yuri_v1 (148k placeholder labels); 0.1 is our choice, the exact value is unpublished.
+  loss_weights: {source: {yuri_v1: 0.1}}
+train:
+  output_dir: runs/jev-27b
+  num_gpus: 1
+  wandb_project: jev-torch
+  global_batch_size: 128
+  micro_batch_size: 8
+  max_steps: 5000
+  min_lr_ratio: 0.02
+  eval_batch_size: 16

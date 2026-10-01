@@ -1,0 +1,24 @@
+# Laptop smoke test (CPU / Apple MPS): same architecture family as 9B/27B, tiny data, minutes.
+#   python -m jev.launch --config configs/debug.yaml
+model:
+  name: Qwen/Qwen3.5-0.8B
+  gradient_checkpointing: false
+data:
+  max_train_examples: 256
+  max_eval_examples: 128
+  max_length: 512
+  eval_splits: [test_set_30k]
+  # autotrust down-weights yuri_v1 (148k placeholder labels); 0.1 is our choice, the exact value is unpublished.
+  loss_weights: {source: {yuri_v1: 0.1}}
+train:
+  output_dir: runs/debug
+  num_gpus: 1
+  wandb_project: jev-torch
+  global_batch_size: 8
+  micro_batch_size: 4
+  val_max_examples: 128
+  eval_every: 16
+  save_every: 16
+  log_every: 4
+  eval_batch_size: 8
+  num_workers: 0

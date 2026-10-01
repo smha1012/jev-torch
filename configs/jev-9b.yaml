@@ -1,0 +1,20 @@
+# Qwen3.5-9B (7.9B backbone, 40.1M LoRA; matches autotrust/JEV-9B exactly).
+# Recipe: LoRA r16 on all projections + 24-slot fp32 head, KL + 0.5 RPS, 128 rows/step,
+# LoRA lr 1e-4 / head lr 2e-4, cosine with 3% warmup, max 1024 tokens.
+#
+# Measured by autotrust: 1x B200, 4,750 steps, ~3 h, 7-9k tok/s.
+# Memory (our estimate at micro_batch_size 16): ~25 GB -> fits 48 GB GPUs; 80 GB is for speed, not fit.
+# num_gpus > 1 = data parallel; global_batch_size must divide by micro_batch_size x num_gpus.
+model:
+  name: Qwen/Qwen3.5-9B
+  gradient_checkpointing: true
+data:
+  # autotrust down-weights yuri_v1 (148k placeholder labels); 0.1 is our choice, the exact value is unpublished.
+  loss_weights: {source: {yuri_v1: 0.1}}
+train:
+  output_dir: runs/jev-9b
+  num_gpus: 1
+  wandb_project: jev-torch
+  global_batch_size: 128
+  micro_batch_size: 16
+  max_steps: 4750

@@ -1,0 +1,19 @@
+# Qwen3.5-27B with the frozen backbone in 4-bit NF4 (QLoRA).
+# Memory (estimate): ~16 GB weights + activations ~ 25-30 GB -> one 48 GB GPU (L40S / A6000).
+# Slower per token than bf16 (dequantization) and slightly lower quality. Not measured by autotrust.
+model:
+  name: Qwen/Qwen3.5-27B
+  gradient_checkpointing: true
+  load_in_4bit: true
+data:
+  # autotrust down-weights yuri_v1 (148k placeholder labels); 0.1 is our choice, the exact value is unpublished.
+  loss_weights: {source: {yuri_v1: 0.1}}
+train:
+  output_dir: runs/jev-27b-qlora
+  num_gpus: 1
+  wandb_project: jev-torch
+  global_batch_size: 128
+  micro_batch_size: 8
+  max_steps: 5000
+  min_lr_ratio: 0.02
+  eval_batch_size: 16

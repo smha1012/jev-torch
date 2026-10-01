@@ -1,0 +1,183 @@
+"""Fast tests with no model or dataset download:  pytest -q"""
+
+import math
+
+import pytest
+import torch
+import torch.nn.functional as F
+
+from jev.collate import KIND_SLOTS, JEVCollator, JEVDataset, LengthGroupedBatchSampler
+from jev.config import load_config
+from jev.losses import fit_temperature, jev_loss, kl_per_example, rps_per_example
+from jev.schema import KINDS, JEVExample
+
+
+class CharTokenizer:
+    """One token per character; enough to test prompt assembly and truncation."""
+
+    pad_token_id = 0
+
+    def __call__(self, text, add_special_tokens=False):
+        return {"input_ids": [ord(c) for c in text]}
+
+
+def ex(kind="choice", options=("a", "b", "c"), target=None, label=None, state="s"):
+    return JEVExample(state=state, question="q?", options=list(options), kind=kind, target=target, label=label)
+
+
+# -- schema --------------------------------------------------------------------
+
+
+def test_target_normalized_and_label_derived():
+    e = ex(target=[1, 3, 0])
+    assert e.target == [0.25, 0.75, 0.0] and e.label == 1
+
+
+@pytest.mark.parametrize("bad", [dict(options=["a"], label=0), dict(label=5), dict(target=[1, 0]), dict()])
+def test_schema_rejects_invalid(bad):
+    kw = {"options": ["a", "b", "c"], **bad}
+    with pytest.raises(ValueError):
+        JEVExample(state="", question="q", **kw)
+
+
+def test_unknown_fields_go_to_meta():
+    e = JEVExample.from_dict({"state": "", "question": "q", "options": ["a", "b"], "label": 0, "family": "x"})
+    assert e.get("family") == "x"
+
+
+# -- config --------------------------------------------------------------------
+
+
+def test_config_overrides(tmp_path):
+    p = tmp_path / "c.yaml"
+    p.write_text("model:\n  name: foo\ntrain:\n  num_gpus: 2\n")
+    cfg = load_config(p, ["train.num_gpus=8", "data.include={source: [openjev_v2]}"])
+    assert cfg.model.name == "foo" and cfg.train.num_gpus == 8
+    assert cfg.data.include == {"source": ["openjev_v2"]}
+    with pytest.raises(ValueError):
+        load_config(p, ["train.not_a_field=1"])
+
+
+# -- collator ------------------------------------------------------------------
+
+
+def test_slots_follow_kind():
+    items = [JEVDataset([e])[0] for e in (ex("noul", ["false", "true"], label=1),
+                                          ex("score", list("012345"), label=3),
+                                          ex("choice", list("abcd"), label=0))]
+    b = JEVCollator(CharTokenizer())(items)
+    assert b["slot_index"][0, :2].tolist() == [0, 1]
+    assert b["slot_index"][1, :6].tolist() == [2, 3, 4, 5, 6, 7]
+    assert b["slot_index"][2, :4].tolist() == [8, 9, 10, 11]
+    assert b["option_mask"].sum(1).tolist() == [2, 6, 4]
+    assert b["kind"].tolist() == [KINDS.index(k) for k in ("noul", "score", "choice")]
+    last = b["attention_mask"].sum(1) - 1  # every prompt ends with the decision marker
+    assert all(b["input_ids"][i, last[i]] == ord(":") for i in range(3))
+
+
+def test_long_state_keeps_head_and_tail():
+    state = "H" * 500 + "M" * 1000 + "T" * 500
+    col = JEVCollator(CharTokenizer(), max_length=300)
+    b = col([JEVDataset([ex(state=state, label=0)])[0]])
+    text = "".join(map(chr, b["input_ids"][0].tolist()))
+    assert len(text) == 300 and text.endswith("[decision]:")
+    assert "H" in text and "T" in text  # 60% head / 40% tail of the state budget survive
+
+
+def test_choice_limit_enforced():
+    with pytest.raises(ValueError):
+        JEVDataset([ex("choice", [str(i) for i in range(KIND_SLOTS["choice"][1] + 1)], label=0)])
+
+
+def test_shuffle_keeps_target_aligned():
+    e = ex("choice", ["a", "b", "c", "d"], target=[0.1, 0.2, 0.3, 0.4])
+    ds = JEVDataset([e], shuffle_prob=1.0)
+    for _ in range(20):
+        it = ds[0]
+        assert dict(zip(it["options"], it["target"])) == dict(zip(e.options, e.target))
+        assert it["options"][it["label"]] == "d"
+
+
+def test_score_options_never_shuffled():
+    ds = JEVDataset([ex("score", list("012345"), label=2)], shuffle_prob=1.0)
+    assert all(ds[0]["options"] == list("012345") for _ in range(10))
+
+
+# -- losses --------------------------------------------------------------------
+
+
+def test_kl_equals_ce_for_one_hot():
+    logits = torch.randn(4, 3)
+    target = F.one_hot(torch.tensor([0, 2, 1, 1]), 3).float()
+    mask = torch.ones(4, 3, dtype=torch.bool)
+    ce = F.cross_entropy(logits, target.argmax(1), reduction="none")
+    assert torch.allclose(kl_per_example(logits, target, mask), ce, atol=1e-5)
+
+
+def test_padding_is_ignored():
+    logits = torch.tensor([[1.0, 2.0, float("-inf")]])
+    target = torch.tensor([[0.3, 0.7, 0.0]])
+    mask = torch.tensor([[True, True, False]])
+    kl = kl_per_example(logits, target, mask)
+    assert torch.isfinite(kl).all()
+    assert torch.allclose(kl, kl_per_example(logits[:, :2], target[:, :2], mask[:, :2]))
+
+
+def test_rps_zero_when_exact_and_ordinal():
+    target = torch.tensor([[0.0, 0.0, 1.0, 0.0]])
+    mask = torch.ones(1, 4, dtype=torch.bool)
+    near = torch.tensor([[0.0, 0.0, 0.0, 9.0]])  # predicts 3 when truth is 2
+    far = torch.tensor([[9.0, 0.0, 0.0, 0.0]])  # predicts 0
+    assert rps_per_example(target.log(), target, mask).item() < 1e-6
+    assert rps_per_example(near, target, mask) < rps_per_example(far, target, mask)
+
+
+def test_rps_only_on_score_rows():
+    logits, target = torch.randn(2, 3), torch.tensor([[1.0, 0, 0], [1.0, 0, 0]])
+    mask = torch.ones(2, 3, dtype=torch.bool)
+    choice = torch.tensor([KINDS.index("choice")] * 2)
+    score = torch.tensor([KINDS.index("score")] * 2)
+    assert jev_loss(logits, target, mask, choice, 0.5) == jev_loss(logits, target, mask, choice, 0.0)
+    assert jev_loss(logits, target, mask, score, 0.5) > jev_loss(logits, target, mask, score, 0.0)
+
+
+def test_temperature_recovers_and_never_hurts():
+    torch.manual_seed(0)
+    true_logits = torch.randn(4000, 4) * 2
+    target = torch.softmax(true_logits, -1)
+    mask = torch.ones_like(target, dtype=torch.bool)
+    t = fit_temperature(true_logits * 3, target, mask)  # overconfident by 3x
+    assert math.isclose(t, 3.0, rel_tol=0.05)
+    assert fit_temperature(true_logits, target, mask) == pytest.approx(1.0, rel=0.02)
+
+
+# -- sampler -------------------------------------------------------------------
+
+
+def test_sampler_shards_disjoint_equal_and_resumable():
+    lengths = list(range(1000))
+    shards = [LengthGroupedBatchSampler(lengths, 8, seed=1, rank=r, world_size=4, multiple_of=2)
+              for r in range(4)]
+    batches = [list(s) for s in shards]
+    assert len({len(b) for b in batches}) == 1 and len(batches[0]) % 2 == 0
+    seen = [i for b in batches for batch in b for i in batch]
+    assert len(seen) == len(set(seen))
+    s = shards[0]
+    s.set_epoch(0, start=5)
+    assert list(s) == batches[0][5:]
+    s.set_epoch(1)
+    assert list(s) != batches[0]  # new order each epoch
+
+
+def test_loss_weights_downweight_rows():
+    e_keep = JEVExample(state="", question="q", options=["false", "true"], kind="noul", target=[0.5, 0.5],
+                        meta={"source": "yuri_v1"})
+    e_other = JEVExample(state="", question="q", options=["false", "true"], kind="noul", label=1,
+                         meta={"source": "yuri_v3"})
+    ds = JEVDataset([e_keep, e_other], loss_weights={"source": {"yuri_v1": 0.1}})
+    b = JEVCollator(CharTokenizer())([ds[0], ds[1]])
+    assert b["weight"].tolist() == pytest.approx([0.1, 1.0])
+    logits = torch.tensor([[2.0, 0.0], [0.0, 0.0]])  # row 0 disagrees with its [0.5, 0.5] target
+    full = jev_loss(logits, b["target"], b["option_mask"], b["kind"], 0.0)
+    weighted = jev_loss(logits, b["target"], b["option_mask"], b["kind"], 0.0, b["weight"])
+    assert weighted < full

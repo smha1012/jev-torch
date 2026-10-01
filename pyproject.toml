@@ -1,0 +1,32 @@
+[project]
+name = "jev-torch"
+version = "0.1.0"
+description = "Train JEV-style calibrated decision models (state + question + options -> probabilities) in PyTorch"
+readme = "README.md"
+license = "Apache-2.0"
+requires-python = ">=3.10"
+dependencies = [
+    "torch>=2.5",
+    "transformers>=5.17",  # Qwen3.5 support; tested with 5.17
+    "peft>=0.21",
+    "datasets>=5.0",
+    "accelerate>=1.0",
+    "safetensors",
+    "pyyaml",
+]
+
+[project.optional-dependencies]
+# Fast kernels for Qwen3.5's gated-delta-net layers; without them a slow pure-torch path is used.
+cuda = ["flash-linear-attention", "bitsandbytes>=0.45", "wandb"]
+dev = ["pytest"]
+
+[project.scripts]
+jev-train = "jev.launch:main"
+jev-predict = "jev.predict:main"
+
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = ["jev"]
