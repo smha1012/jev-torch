@@ -4,6 +4,18 @@ This guide goes from an empty RunPod account to a trained, calibrated model on t
 It uses the two scripts in [`scripts/`](../scripts): `runpod_setup.sh` (once per pod) and `runpod_train.sh`
 (each run).
 
+> [!IMPORTANT]
+> **Tested environment.** This guide has only been tested on the setup below. Other GPUs, GPU counts or
+> images should work, but behave differently in the ways listed in [Other GPUs](#other-gpus) and have not been
+> verified.
+>
+> | | |
+> |---|---|
+> | RunPod image | `runpod/pytorch:1.0.2-cu1281-torch280-ubuntu2404` |
+> | GPUs | 2× NVIDIA H100 SXM (80 GB) |
+> | Software | Ubuntu 24.04 · Python 3.12 · torch 2.8.0+cu128 · Triton 3.4.0 · transformers 5.17.0 · flash-linear-attention 0.5.2 |
+> | Status (2026-10-01) | setup and the GPU smoke test are being validated; no full training run has finished yet |
+
 **Contents**
 
 1. [Before you start](#1-before-you-start)
@@ -47,6 +59,18 @@ script is tested against this image and keeps its torch build untouched.
 | `jev-27b-qlora.yaml` | 1× L40S or A6000 (48 GB) | slower than bf16 |
 
 A pod with 2+ GPUs also lets the setup's smoke test check multi-GPU training before your real run.
+
+### Other GPUs
+
+Only 2× H100 SXM has been tried (see the box at the top). On other hardware, expect these differences:
+
+| | What changes |
+|---|---|
+| **Hopper (H100, H200)** | with the image's Triton 3.4, flash-linear-attention needs its TileLang backend for correct gradients ([fla #640](https://github.com/fla-org/flash-linear-attention/issues/640)). The setup installs `tilelang` and `nvcc` and checks that the backend is active |
+| **Ampere / Ada (A100, L40S, A6000) and Blackwell (B200)** | the Triton kernels are used directly; TileLang is not installed. Not tested here |
+| **Speed and memory** | the times and memory figures in this guide are estimates scaled from autotrust's B200 measurements, not measured on these GPUs |
+| **Results** | not bit-identical across GPU types or GPU counts: kernels differ, bf16 rounding differs, and with more GPUs each rank sees a different slice of every batch. Metrics should agree closely, not exactly |
+| **Other images** | a different torch / CUDA / Triton combination can change which kernels run; the setup re-checks torch and the kernels, but only this image has been tried |
 
 **Storage:** attach a **network volume mounted at `/workspace`**. Everything that must survive a restart
 (code, Hugging Face cache, checkpoints) lives there.

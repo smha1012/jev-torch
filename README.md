@@ -233,6 +233,11 @@ rows; gradient accumulation is derived automatically.
 
 ## 🏃 Training on RunPod
 
+> [!IMPORTANT]
+> **Tested only on** RunPod `runpod/pytorch:1.0.2-cu1281-torch280-ubuntu2404` with **2× H100 SXM** (torch 2.8,
+> Triton 3.4); validation is in progress. Other GPUs behave differently, see
+> [Other GPUs](docs/runpod.md#other-gpus).
+
 > [!TIP]
 > 📘 **New to RunPod? Follow the [step-by-step guide](docs/runpod.md)**: choosing a GPU and disk, tokens,
 > setup, watching a run, resuming, publishing the result, and troubleshooting.
