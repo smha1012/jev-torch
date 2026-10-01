@@ -350,30 +350,86 @@ Full logs: training in `runs/<name>/train.log`, smoke test in `/tmp/jev-smoke.lo
 
 ## 12. Cheat sheet
 
+Every block below can be copied and run as it is. The examples use 2 GPUs; change `train.num_gpus=2` to
+match your pod.
+
+**① Get the code** (once per network volume)
+
 ```bash
-# once per pod
 cd /workspace && git clone https://github.com/smha1012/jev-torch.git && cd jev-torch
-echo "HF_TOKEN=hf_your_token" > .env.local
-echo "WANDB_API_KEY=your_key" >> .env.local      # optional
-bash scripts/runpod_setup.sh configs/jev-9b.yaml
-
-# after a pod restart (packages are gone, /workspace is kept)
-cd /workspace/jev-torch && git pull
-SKIP_SMOKE=1 bash scripts/runpod_setup.sh
-
-# train (rerun the same line to resume)
-bash scripts/runpod_train.sh configs/jev-9b.yaml [--set train.num_gpus=4 ...]
-
-# watch / stop
-tail -f runs/jev-9b/train.log
-watch -n 5 nvidia-smi
-pgrep -af 'jev\.(launch|train)'
-pkill -f 'jev\.(launch|train)'
-
-# afterwards
-python3 examples/inference.py --model runs/jev-9b/best
-python3 -m jev.push_to_hub --ckpt runs/jev-9b/best --repo your-name/jev-9b --tag final   # only if the auto push failed
-wandb sync runs/jev-9b/wandb/offline-run-*                                               # only if W&B ran offline
-pip freeze > scripts/requirements.lock
-df -h /workspace
 ```
+
+**② Tokens.** Skip this if you set `HF_TOKEN` / `WANDB_API_KEY` as environment variables when creating the pod.
+
+```bash
+echo "HF_TOKEN=hf_your_token" > .env.local
+echo "WANDB_API_KEY=your_key" >> .env.local
+```
+
+**③ Setup** (once per pod start; ends with `smoke test passed`)
+
+```bash
+bash scripts/runpod_setup.sh configs/jev-9b.yaml
+```
+
+**④ Train.** Starts in the background. Running the same line again later resumes the run.
+
+```bash
+bash scripts/runpod_train.sh configs/jev-9b.yaml --set train.num_gpus=2
+```
+
+**⑤ Watch the log.** `Ctrl+C` only stops watching; training keeps running.
+
+```bash
+tail -f runs/jev-9b/train.log
+```
+
+**⑥ Watch the GPUs.** `Ctrl+C` to leave.
+
+```bash
+watch -n 5 nvidia-smi
+```
+
+**⑦ Is training running?** No output means it has stopped.
+
+```bash
+pgrep -af 'jev\.(launch|train)'
+```
+
+**⑧ Try the trained model** (after training finishes)
+
+```bash
+python3 examples/inference.py --model runs/jev-9b/best
+```
+
+**⑨ Freeze the package versions** (after the first successful run)
+
+```bash
+pip freeze > scripts/requirements.lock
+```
+
+---
+
+**After a pod restart** (installed packages are wiped, `/workspace` is kept): run setup again, then the same
+train line as before.
+
+```bash
+cd /workspace/jev-torch
+SKIP_SMOKE=1 bash scripts/runpod_setup.sh
+bash scripts/runpod_train.sh configs/jev-9b.yaml --set train.num_gpus=2
+```
+
+> [!WARNING]
+> **Stop training** only when you mean to. This kills the run (it can be resumed later with ④):
+>
+> ```bash
+> pkill -f 'jev\.(launch|train)'
+> ```
+
+**Only if needed:**
+
+| Situation | Command |
+|---|---|
+| The automatic Hub upload failed | `python3 -m jev.push_to_hub --ckpt runs/jev-9b/best --repo your-name/jev-9b --tag final` |
+| W&B ran without a key (offline) | `wandb sync runs/jev-9b/wandb/offline-run-*` |
+| Check free disk space | `df -h /workspace` |

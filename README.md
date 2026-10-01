@@ -375,7 +375,8 @@ score, and **confidence-threshold routing**. From the shell:
 
 ```bash
 python examples/inference.py --model your-name/jev-9b
-python -m jev.predict --ckpt your-name/jev-9b --input questions.jsonl [--metrics]
+python -m jev.predict --ckpt your-name/jev-9b --input questions.jsonl
+python -m jev.predict --ckpt your-name/jev-9b --input labeled.jsonl --metrics
 python -m jev.push_to_hub --ckpt runs/jev-9b/best --repo your-name/jev-9b    # manual upload
 ```
 
