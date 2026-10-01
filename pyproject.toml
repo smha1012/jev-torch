@@ -22,6 +22,7 @@ dependencies = [
 [project.optional-dependencies]
 cuda = [
     "flash-linear-attention>=0.5,<0.6",  # fast kernels for Qwen3.5's gated delta rule (required for speed)
+    "tilelang>=0.1.15,<0.2; platform_system == 'Linux'",  # fla's backward on Hopper with Triton < 3.7.1 (#640)
     "bitsandbytes>=0.45,<0.51",          # only for load_in_4bit configs
     "wandb>=0.30,<0.31",
 ]

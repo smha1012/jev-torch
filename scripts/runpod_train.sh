@@ -19,6 +19,11 @@ if [ -f .env.local ]; then set -a; . ./.env.local; set +a; fi
 set -u
 
 export HF_HOME="${HF_HOME:-/workspace/hf_cache}"
+# TileLang (used by fla on Hopper GPUs) compiles kernels at runtime and needs nvcc.
+if [ -z "${CUDA_HOME:-}" ]; then
+  for d in /usr/local/cuda /usr/local/cuda-*; do [ -x "$d/bin/nvcc" ] && export CUDA_HOME="$d" && break; done
+fi
+[ -n "${CUDA_HOME:-}" ] && export PATH="$CUDA_HOME/bin:$PATH"
 export TOKENIZERS_PARALLELISM=false
 export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 

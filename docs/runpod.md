@@ -362,6 +362,7 @@ The input format for `jev.predict` is described in the [README](../README.md#-da
 | `config asks for train.num_gpus=N but only M CUDA device(s) are visible` | more GPUs requested than the pod has | lower `train.num_gpus` |
 | `warning: runs/... is not on /workspace` | repo cloned outside the network volume | re-clone under `/workspace`, or checkpoints vanish when the pod stops |
 | `No space left on device` | volume too small | resize the volume (section 2) or delete old `runs/*` and `$HF_HOME` models |
+| `Triton >= 3.4.0 and < 3.7.1 on Hopper GPUs produces incorrect results ... install tilelang` | H100/H200 with the image's Triton 3.4: fla needs its TileLang backend, which needs nvcc | `git pull` and rerun `bash scripts/runpod_setup.sh` (it installs tilelang and nvcc and checks the backend) |
 | very low `tok/s` | slow kernels, or a GPU smaller than planned | check the smoke-test warnings; compare with section 2 |
 | the run restarts from step 0 unexpectedly | `output_dir` changed, so `last/` was not found | use the same `train.output_dir` (and `--set` flags) as the original run |
 | `ModuleNotFoundError: No module named 'jev'` (or `fla`) after a restart | the container disk was wiped | `SKIP_SMOKE=1 bash scripts/runpod_setup.sh` (section 8) |

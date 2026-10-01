@@ -62,6 +62,42 @@ fi
 $PY -m pip install -q -c /tmp/jev-constraints.txt -e ".[cuda,dev]"
 $PY -c "import transformers, peft, fla; print(f'  transformers {transformers.__version__} · peft {peft.__version__} · flash-linear-attention {fla.__version__}')"
 
+say "Hopper check: fla gradients need TileLang + nvcc here (fla issue #640)"
+# On Hopper (H100/H200) with Triton 3.4-3.7.0 (torch 2.8 ships 3.4.0), fla's Triton backward for the gated
+# delta rule gives wrong gradients, so fla refuses to run it. Its TileLang backend replaces that kernel,
+# but TileLang compiles at runtime and needs nvcc. Install both here instead of failing mid-training.
+NEED_TILELANG="$($PY -c 'import fla.utils as u; print(int(u.IS_NVIDIA_HOPPER and u.TRITON_ABOVE_3_4_0 and not u.TRITON_ABOVE_3_7_1))' 2>/dev/null || echo 0)"
+find_cuda_home() { for d in /usr/local/cuda /usr/local/cuda-*; do [ -x "$d/bin/nvcc" ] && { echo "$d"; return; }; done; }
+if [ "$NEED_TILELANG" = "1" ]; then
+  echo "  Hopper GPU + Triton $($PY -c 'import triton; print(triton.__version__)'): installing tilelang and nvcc"
+  $PY -m pip install -q -c /tmp/jev-constraints.txt "tilelang>=0.1.15,<0.2"
+  if ! command -v nvcc >/dev/null && [ -z "$(find_cuda_home)" ]; then
+    CUV="$($PY -c 'import torch; print(torch.version.cuda.replace(".", "-"))')"        # e.g. 12-8
+    apt-get install -y -qq "cuda-nvcc-$CUV" "cuda-cudart-dev-$CUV" >/dev/null 2>&1 || {
+      echo "  adding NVIDIA's apt repository for cuda-nvcc-$CUV"
+      UBU="$(. /etc/os-release; echo "ubuntu${VERSION_ID/./}")"
+      curl -fsSL -o /tmp/cuda-keyring.deb \
+        "https://developer.download.nvidia.com/compute/cuda/repos/$UBU/x86_64/cuda-keyring_1.1-1_all.deb" \
+        && dpkg -i /tmp/cuda-keyring.deb >/dev/null && apt-get update -qq \
+        && apt-get install -y -qq "cuda-nvcc-$CUV" "cuda-cudart-dev-$CUV" >/dev/null
+    } || echo "  !! could not install cuda-nvcc-$CUV"
+  fi
+  CUDA_HOME="${CUDA_HOME:-$(find_cuda_home)}"
+  [ -n "$CUDA_HOME" ] && export CUDA_HOME && export PATH="$CUDA_HOME/bin:$PATH" \
+    && { grep -q "^export CUDA_HOME=" ~/.bashrc 2>/dev/null || echo "export CUDA_HOME=$CUDA_HOME" >> ~/.bashrc; }
+  $PY - <<'PY'
+import sys
+from fla.ops.common.backends.tilelang import TileLangBackend as B
+ok = B.is_available() and B.is_enabled()
+print(f"  tilelang backend: {'active' if ok else 'NOT usable'}")
+if not ok:
+    sys.exit("  !! fla would stop with 'Triton >= 3.4.0 and < 3.7.1 on Hopper GPUs produces incorrect results'.\n"
+             "     Needs `pip install tilelang` and an nvcc (CUDA toolkit) on PATH or in CUDA_HOME.")
+PY
+else
+  echo "  not needed on this GPU / Triton version"
+fi
+
 say "Optional: causal-conv1d"
 # Small speedup for Qwen3.5's short convolution; transformers falls back to torch without it.
 # Building needs nvcc; without it, skip instead of failing slowly.
