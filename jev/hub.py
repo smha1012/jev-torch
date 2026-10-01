@@ -80,7 +80,11 @@ class HubUploader:
             repo = resolve_repo(hf_push, who["name"], [o["name"] for o in who.get("orgs", [])], run_name)
         except ValueError as e:
             raise SystemExit(f"[!] {e}")
-        api.create_repo(repo, private=private, exist_ok=True)
+        try:
+            api.create_repo(repo, private=private, exist_ok=True)
+        except Exception as e:
+            raise SystemExit(f"[!] cannot create or access {repo} with this HF token ({type(e).__name__}: {e}). "
+                             f"It needs WRITE access; or set train.hf_push=null to keep checkpoints local.")
         try:
             existing = [f for f in api.list_repo_files(repo) if f not in ("README.md", ".gitattributes")]
         except Exception:

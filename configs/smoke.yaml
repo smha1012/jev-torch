@@ -1,0 +1,24 @@
+# GPU smoke test run by scripts/runpod_setup.sh: the real training path end to end in ~2-3 minutes
+# (Qwen3.5 kernels on CUDA, bf16, LoRA, DDP when num_gpus > 1, calibration, report).
+# Never pushes to the Hub or W&B.
+model:
+  name: Qwen/Qwen3.5-0.8B
+  gradient_checkpointing: true
+data:
+  max_train_examples: 128
+  max_eval_examples: 64
+  max_length: 512
+  eval_splits: [test_set_30k]
+train:
+  output_dir: runs/smoke
+  num_gpus: 1
+  global_batch_size: 16
+  micro_batch_size: 8
+  max_steps: 4
+  val_max_examples: 64
+  eval_every: 2
+  save_every: 2
+  log_every: 1
+  eval_batch_size: 16
+  wandb_project: null
+  hf_push: null

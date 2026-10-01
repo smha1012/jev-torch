@@ -5,20 +5,27 @@ description = "Unofficial PyTorch implementation for training JEV-style calibrat
 readme = "README.md"
 license = "Apache-2.0"
 requires-python = ">=3.10"
+# Every dependency has an upper bound: an unbounded one installs whatever is newest on the day the pod
+# is created and can break a run that worked yesterday. Ranges start at the versions tested together.
+# After a successful run, freeze the exact set: pip freeze > scripts/requirements.lock
 dependencies = [
-    "torch>=2.5",
-    "transformers>=5.17",  # Qwen3.5 support; tested with 5.17
-    "peft>=0.21",
-    "datasets>=5.0",
-    "accelerate>=1.0",
-    "safetensors",
-    "pyyaml",
+    "torch>=2.5",                       # on RunPod the image's own torch is pinned; never upgraded
+    "transformers>=5.17,<5.18",         # Qwen3.5 support; moves fast, so pinned to the tested minor
+    "peft>=0.21,<0.22",
+    "datasets>=5.0,<6",
+    "accelerate>=1.0,<2",
+    "huggingface_hub>=1.5,<2",
+    "safetensors>=0.4,<1",
+    "pyyaml>=6,<7",
 ]
 
 [project.optional-dependencies]
-# Fast kernels for Qwen3.5's gated-delta-net layers; without them a slow pure-torch path is used.
-cuda = ["flash-linear-attention", "bitsandbytes>=0.45", "wandb"]
-dev = ["pytest"]
+cuda = [
+    "flash-linear-attention>=0.5,<0.6",  # fast kernels for Qwen3.5's gated delta rule (required for speed)
+    "bitsandbytes>=0.45,<0.51",          # only for load_in_4bit configs
+    "wandb>=0.30,<0.31",
+]
+dev = ["pytest>=8,<10"]
 
 [project.scripts]
 jev-train = "jev.launch:main"

@@ -199,13 +199,21 @@ bash scripts/runpod_setup.sh configs/jev-9b.yaml    # 📦 install, check kernel
 bash scripts/runpod_train.sh configs/jev-9b.yaml    # 🏃 background run → runs/jev-9b/train.log
 ```
 
-- 🔒 `runpod_setup.sh` pins the image's own torch build so pip never replaces it, and installs
-  `flash-linear-attention`, the fast kernel Qwen3.5 needs. Without it a slow pure-torch path is used.
+`runpod_setup.sh` is built to fail early rather than after hours of GPU time:
+
+| Step | What it guards against |
+|---|---|
+| 🔒 pins the image's torch, then **re-checks** it after install | pip silently replacing torch with a build for another CUDA |
+| 📌 installs bounded dependency ranges, or the exact `scripts/requirements.lock` if present | a new release on pod-creation day breaking a run that worked yesterday |
+| ⚡ installs and **imports** `flash-linear-attention` | Qwen3.5 falling back to a very slow pure-torch path |
+| 🔑 validates `HF_TOKEN` (account, read/write role) and logs in to W&B | a bad token surfacing only when the first checkpoint is pushed |
+| 🧪 **GPU smoke test**: 4 real training steps of Qwen3.5-0.8B (on 2 GPUs when available) through calibration and report | kernel, bf16, DDP or pipeline bugs before the long run (`SKIP_SMOKE=1` to skip) |
+
 - 🔁 `runpod_train.sh` always resumes: if the pod is preempted, run the same command again and training
   continues from `runs/<name>/last`.
-- 🧪 First time on a new setup? Do a cheap end-to-end check, including multi-GPU, before a long run:
+- 🧊 After the first successful run, freeze the versions so every future pod is identical:
   ```bash
-  bash scripts/runpod_train.sh configs/debug.yaml --set train.num_gpus=2
+  pip freeze > scripts/requirements.lock && git add scripts/requirements.lock && git commit -m "Lock versions"
   ```
 
 ### 📊 Weights & Biases
