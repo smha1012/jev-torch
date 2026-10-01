@@ -20,6 +20,7 @@ import yaml
 
 from .env import load_env
 from .hub import HubUploader, stage_checkpoint
+from .losses import JEVLoss
 
 
 def _metrics_table(report: dict) -> str:
@@ -69,7 +70,7 @@ def build_model_card(ckpt: Path, repo_id: str, status: str | None = None) -> str
         f"- **Training data:** {describe_source(data_cfg)}",
         f"- **Base model:** [`{base}`](https://huggingface.co/{base}) (frozen) + LoRA r={meta['model']['lora_r']}, "
         f"α={meta['model']['lora_alpha']} + 24-slot fp32 decision head",
-        f"- **Loss:** KL to the teacher distribution + {train.get('rps_weight', 0.5)} · RPS on `score` rows",
+        f"- **Loss:** `{JEVLoss(train.get('loss')).describe()}`",
     ]
     if train:
         settings.append(f"- **Optimization:** {train.get('max_steps') or '1 epoch'} steps × "

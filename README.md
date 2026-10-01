@@ -180,7 +180,7 @@ Defaults follow the published [JEV-9B](https://huggingface.co/autotrust/JEV-9B) 
 | 🦴 **Backbone** | Qwen3.5 text tower, bf16, frozen |
 | 🔧 **LoRA** | r 16 · α 32 · dropout 0.05 on every projection (40.1M params for 9B, 108.8M for 27B, same as JEV) |
 | 🎯 **Head** | 24 fp32 slots: `false/true` · `0–5` · `A–P`, initialized from those tokens' LM-head rows |
-| 📉 **Loss** | KL(teacher ‖ model) over active slots + 0.5 · RPS on `score` rows |
+| 📉 **Loss** | KL(teacher ‖ model) over active slots + 0.5 · RPS on `score` rows ([configurable](#-extending)) |
 | 🔀 **Augmentation** | 30% of `choice` rows get their options shuffled (targets follow) |
 | ✂️ **Context** | 1,024 tokens; a long state keeps its first 60% and last 40% |
 | 🏃 **Optimization** | 128 rows/step · AdamW β (0.9, 0.98) · LoRA lr 1e-4, head lr 2e-4 · cosine, 3% warmup · ~1 epoch |
@@ -410,6 +410,34 @@ Then set `data.source: my_data`. The trainer does not change.
 </details>
 
 <details>
+<summary><b>Choose or add a loss</b></summary>
+<br>
+
+`train.loss` is a weighted sum of named terms, each optionally limited to some question kinds:
+
+```yaml
+train:
+  loss:
+    kl: 1.0                               # KL to the teacher distribution (default)
+    rps: {weight: 0.5, kinds: [score]}    # ordinal penalty on 0–5 scores (default)
+    # brier: 0.25                         # probability squared error (Open-Jev style)
+    # ce: 1.0                             # hard-label cross-entropy, ignores soft targets
+```
+
+From the command line: `--set train.loss="{kl: 1.0, brier: 0.25}"`. Each term is logged separately
+(`loss/kl`, `loss/rps`, …). Add your own:
+
+```python
+from jev.losses import register_loss
+
+@register_loss("js")
+def js(logits, target, option_mask, **_):   # return one value per row, shape [B]
+    ...
+```
+
+</details>
+
+<details>
 <summary><b>Filter or re-weight the corpus</b></summary>
 <br>
 
@@ -441,7 +469,7 @@ jev/
 ├── sources.py      # data sources: jev_distill, jsonl, commonsense_qa
 ├── collate.py      # prompt, 24-slot mapping, truncation, length-grouped DDP sampler
 ├── model.py        # JEVModel: backbone + LoRA + head
-├── losses.py       # KL, RPS, temperature scaling, metrics
+├── losses.py       # loss registry (kl, ce, brier, rps), temperature scaling, metrics
 ├── trainer.py      # DDP training, sharded eval, resume, calibration, W&B
 ├── hub.py          # automatic Hub uploads
 ├── launch.py       # reads train.num_gpus, re-executes under torchrun
@@ -468,12 +496,19 @@ docs/assets/        # README artwork (python docs/assets/build.py)
 
 Contributions are welcome. Open an issue first for larger changes, and run `pytest -q` before a pull request.
 
+## 🔗 Related projects
+
+| Project | Approach |
+|---|---|
+| [autotrust/JEV](https://huggingface.co/autotrust/JEV-9B) | Qwen3.5 9B / 27B distilled from Jev 1.13 with a 24-slot head; the recipe this repo follows |
+| [Open-Jev](https://github.com/Zefan-Cai/Open-Jev) | one forward pass per candidate with a scalar head; trained on open labels |
+| [train-your-first-jev](https://github.com/cexll/train-your-first-jev) | a hands-on course: a CPU byte-level scorer and a small Qwen2.5 choice scorer |
+
 ## 🙏 Acknowledgements
 
 - [autotrust/JEV](https://huggingface.co/autotrust/JEV-9B) for openly documenting the recipe reproduced here
 - [SargeDev/jev-distill-corpus-v3](https://huggingface.co/datasets/SargeDev/jev-distill-corpus-v3) and
   [ZefanCai/Open-Jev](https://huggingface.co/datasets/ZefanCai/Open-Jev) for the training data
-- [cexll/train-your-first-jev](https://github.com/cexll/train-your-first-jev) for a friendly introduction to JEV-style models
 - [Qwen](https://huggingface.co/Qwen), 🤗 Transformers and PEFT
 
 <sub>**Unofficial.** An independent re-implementation, not affiliated with or endorsed by TypeSafe AI (makers of

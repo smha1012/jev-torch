@@ -65,7 +65,9 @@ class TrainConfig:
     warmup_ratio: float = 0.03
     min_lr_ratio: float = 0.0  # cosine floor as a fraction of peak lr (JEV-27B: 0.02)
     max_grad_norm: float = 1.0
-    rps_weight: float = 0.5  # RPS on ordinal (kind=score) rows, added to KL
+    # Weighted loss terms by name (jev.losses.LOSSES: kl, ce, brier, rps, or your own register_loss).
+    # A term is `name: weight` or `name: {weight, kinds}`. Default = the JEV-9B / 27B recipe.
+    loss: dict = field(default_factory=lambda: {"kl": 1.0, "rps": {"weight": 0.5, "kinds": ["score"]}})
     eval_every: int = 500
     val_max_examples: int | None = 4000  # val subset used for checkpoint selection during training
     save_every: int = 250  # resumable state in <output_dir>/last (pods can be preempted)

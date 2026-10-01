@@ -10,8 +10,6 @@ import torch.nn.functional as F
 
 from .schema import KINDS
 
-SCORE = KINDS.index("score")
-
 
 def kl_per_example(logits, target, option_mask):
     """KL(target || softmax(logits)) per row. Equals cross-entropy when target is one-hot."""
@@ -29,19 +27,108 @@ def rps_per_example(logits, target, option_mask):
     return ((p.cumsum(-1) - target.cumsum(-1)) ** 2).sum(-1) / (k - 1)
 
 
-def jev_loss(logits, target, option_mask, kind, rps_weight: float = 0.5, weight=None):
-    """KL over active slots on every row + rps_weight * RPS on score rows (JEV-9B recipe).
+def ce_per_example(logits, label, **_):
+    """Cross-entropy against the hard label only (ignores the soft target)."""
+    return -F.log_softmax(logits, dim=-1).gather(1, label.unsqueeze(1)).squeeze(1)
 
-    `weight` [B] down-weights rows (e.g. placeholder labels); the batch mean is still over B rows,
-    so down-weighted rows simply contribute less instead of inflating the others.
+
+def brier_per_example(logits, target, option_mask):
+    """Squared error between the predicted and target probability vectors (Open-Jev uses NLL + Brier)."""
+    p = torch.softmax(logits, dim=-1).masked_fill(~option_mask, 0.0)
+    return ((p - target) ** 2).sum(-1)
+
+
+# ---------------------------------------------------------------------------
+# Loss registry: train.loss picks a weighted combination by name
+# ---------------------------------------------------------------------------
+
+LOSSES: dict[str, dict] = {}
+
+
+def register_loss(name: str, default_kinds: tuple[str, ...] | None = None):
+    """Register a per-example loss `fn(logits, target, option_mask, label, kind) -> [B]`.
+
+    `default_kinds` restricts where it applies unless the config says otherwise (RPS only makes sense on
+    ordinal `score` rows). Example of a custom loss:
+
+        @register_loss("js")
+        def js(logits, target, option_mask, **_):
+            ...
     """
-    loss = kl_per_example(logits, target, option_mask)
-    if rps_weight > 0:
-        is_score = (kind == SCORE).float()
-        loss = loss + rps_weight * is_score * rps_per_example(logits, target, option_mask)
-    if weight is not None:
-        loss = loss * weight
-    return loss.mean()
+    def deco(fn):
+        LOSSES[name] = {"fn": fn, "kinds": default_kinds}
+        return fn
+
+    return deco
+
+
+register_loss("kl")(lambda logits, target, option_mask, **_: kl_per_example(logits, target, option_mask))
+register_loss("ce")(lambda logits, label, **_: ce_per_example(logits, label))
+register_loss("brier")(lambda logits, target, option_mask, **_: brier_per_example(logits, target, option_mask))
+register_loss("rps", default_kinds=("score",))(
+    lambda logits, target, option_mask, **_: rps_per_example(logits, target, option_mask))
+
+DEFAULT_LOSS = {"kl": 1.0, "rps": {"weight": 0.5, "kinds": ["score"]}}  # JEV-9B / 27B recipe
+
+
+class JEVLoss:
+    """Weighted sum of registered losses, configured as `train.loss`:
+
+        loss:
+          kl: 1.0                                  # name: weight
+          rps: {weight: 0.5, kinds: [score]}       # name: {weight, kinds}
+          # brier: 0.25                            # e.g. the Open-Jev style NLL + Brier
+
+    Each term is averaged per row, restricted to its kinds, multiplied by the row weight
+    (data.loss_weights) and summed. The batch mean is over all rows, so down-weighted or excluded rows
+    contribute less instead of inflating the others.
+    """
+
+    def __init__(self, spec: dict | None = None):
+        spec = DEFAULT_LOSS if spec is None else spec
+        if not spec:
+            raise ValueError("train.loss is empty")
+        self.terms = []
+        for name, value in spec.items():
+            if name not in LOSSES:
+                raise ValueError(f"unknown loss {name!r}; registered: {sorted(LOSSES)}")
+            if isinstance(value, dict):
+                bad = set(value) - {"weight", "kinds"}
+                if bad:
+                    raise ValueError(f"loss {name!r}: unknown keys {sorted(bad)} (use weight, kinds)")
+                weight, kinds = float(value.get("weight", 1.0)), value.get("kinds", LOSSES[name]["kinds"])
+            else:
+                weight, kinds = float(value), LOSSES[name]["kinds"]
+            if kinds is not None:
+                unknown = set(kinds) - set(KINDS)
+                if unknown:
+                    raise ValueError(f"loss {name!r}: unknown kinds {sorted(unknown)}; use {list(KINDS)}")
+                kinds = tuple(kinds)
+            if weight != 0:
+                self.terms.append((name, weight, kinds))
+        if not self.terms:
+            raise ValueError("train.loss has no term with a non-zero weight")
+
+    def __call__(self, logits, target, option_mask, kind, label, weight=None):
+        """Returns (scalar loss, {term name: detached mean}) for logging."""
+        total = torch.zeros(logits.size(0), device=logits.device)
+        parts = {}
+        for name, w, kinds in self.terms:
+            per_row = LOSSES[name]["fn"](logits=logits, target=target, option_mask=option_mask,
+                                         label=label, kind=kind)
+            if kinds is not None:
+                mask = torch.zeros_like(per_row)
+                for k in kinds:
+                    mask = mask + (kind == KINDS.index(k)).float()
+                per_row = per_row * mask
+            parts[name] = per_row.detach().mean()
+            total = total + w * per_row
+        if weight is not None:
+            total = total * weight
+        return total.mean(), parts
+
+    def describe(self) -> str:
+        return " + ".join(f"{w:g}·{n}" + (f"[{','.join(k)}]" if k else "") for n, w, k in self.terms)
 
 
 # ---------------------------------------------------------------------------

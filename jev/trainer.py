@@ -21,7 +21,7 @@ from torch.utils.data import DataLoader
 from .collate import KIND_SLOTS, JEVCollator, JEVDataset, LengthGroupedBatchSampler
 from .config import JEVConfig
 from .distributed import DistContext
-from .losses import apply_temperatures, compute_metrics, fit_temperatures, jev_loss, metrics_by
+from .losses import JEVLoss, apply_temperatures, compute_metrics, fit_temperatures, metrics_by
 from .model import JEVModel
 from .push_to_hub import build_model_card
 from .schema import KINDS, JEVExample
@@ -105,6 +105,7 @@ class Trainer:
         self.collator = JEVCollator(tokenizer, max_length=cfg.data.max_length)
         self.device = ctx.device
         self.use_autocast = ctx.device.type == "cuda" and dtype == torch.bfloat16
+        self.criterion = JEVLoss(cfg.train.loss)
         self.history: list[dict] = []
         self.wandb = None
         self.hub = hub  # HubUploader on rank 0 when pushing is enabled, else None
@@ -261,6 +262,7 @@ class Trainer:
             ctx.print(f"--resume given but {last} has no trainer_state.pt; starting fresh")
 
         n_train = sum(p.numel() for p in self.model.trainable_parameters())
+        ctx.print(f"loss = {self.criterion.describe()}")
         ctx.print(f"world_size={ctx.world_size} micro_batch={tc.micro_batch_size} grad_accum={accum} "
                   f"global_batch={tc.global_batch_size} steps/epoch={steps_per_epoch} total_steps={total_steps} "
                   f"trainable={n_train / 1e6:.1f}M")
@@ -285,6 +287,7 @@ class Trainer:
 
         self.model.train()
         t0, tokens, losses, done = time.time(), 0, [], step >= total_steps
+        term_sums: dict[str, torch.Tensor] = {}
         for epoch in range(start_epoch, tc.epochs):
             if done:
                 break
@@ -299,10 +302,12 @@ class Trainer:
                 with no_sync:  # backward must be inside no_sync, or DDP all-reduces every micro-step
                     with self.autocast():
                         logits = ddp(**batch)
-                        loss = jev_loss(logits, batch["target"], batch["option_mask"], batch["kind"],
-                                        tc.rps_weight, batch["weight"])
+                        loss, parts = self.criterion(logits, batch["target"], batch["option_mask"],
+                                                     batch["kind"], batch["label"], batch["weight"])
                     (loss / accum).backward()
                 losses.append(loss.detach())
+                for name, v in parts.items():
+                    term_sums[name] = term_sums.get(name, 0.0) + v
                 tokens += int(batch["attention_mask"].sum())
                 if not sync:
                     continue
@@ -317,12 +322,13 @@ class Trainer:
                     dt = time.time() - t0
                     rec = {"step": step, "epoch": epoch, "loss": ctx.mean(torch.stack(losses).mean().item()),
                            "grad_norm": float(grad_norm), "lr": scheduler.get_last_lr()[0],
-                           "tokens_per_s": ctx.sum(tokens) / dt}
+                           "tokens_per_s": ctx.sum(tokens) / dt,
+                           **{f"loss/{n}": ctx.mean((v / len(losses)).item()) for n, v in term_sums.items()}}
                     self.log(rec)
                     eta = (total_steps - step) * dt / tc.log_every / 3600
                     ctx.print(f"step {step}/{total_steps} loss {rec['loss']:.4f} gnorm {rec['grad_norm']:.2f} "
                               f"lr {rec['lr']:.2e} {rec['tokens_per_s']:.0f} tok/s eta {eta:.1f}h")
-                    t0, tokens, losses = time.time(), 0, []
+                    t0, tokens, losses, term_sums = time.time(), 0, [], {}
                 if step % tc.eval_every == 0:
                     validate()
                     t0 = time.time()

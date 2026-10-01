@@ -22,6 +22,7 @@ from .config import load_config
 from .distributed import cleanup, pick_dtype, setup
 from .env import env_overrides, load_env
 from .hub import HubUploader
+from .losses import JEVLoss
 from .model import JEVModel
 from .sources import describe_source, load_split
 from .trainer import Trainer
@@ -40,6 +41,7 @@ def main(argv=None):
     load_env()  # HF_TOKEN / WANDB_API_KEY / JEV_OVERRIDES from .env.local; real environment variables win
     personal = env_overrides()
     cfg = load_config(args.config, personal + args.set)
+    JEVLoss(cfg.train.loss)  # fail now on a bad train.loss, not after loading a 27B model
     os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
     ctx = setup(cfg.train.device)
     dtype = pick_dtype(ctx.device, cfg.train.dtype)

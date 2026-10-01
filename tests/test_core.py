@@ -8,7 +8,7 @@ import torch.nn.functional as F
 
 from jev.collate import KIND_SLOTS, JEVCollator, JEVDataset, LengthGroupedBatchSampler
 from jev.config import load_config
-from jev.losses import fit_temperature, jev_loss, kl_per_example, rps_per_example
+from jev.losses import JEVLoss, fit_temperature, kl_per_example, rps_per_example
 from jev.schema import KINDS, JEVExample
 
 
@@ -135,10 +135,12 @@ def test_rps_zero_when_exact_and_ordinal():
 def test_rps_only_on_score_rows():
     logits, target = torch.randn(2, 3), torch.tensor([[1.0, 0, 0], [1.0, 0, 0]])
     mask = torch.ones(2, 3, dtype=torch.bool)
+    label = torch.tensor([0, 0])
     choice = torch.tensor([KINDS.index("choice")] * 2)
     score = torch.tensor([KINDS.index("score")] * 2)
-    assert jev_loss(logits, target, mask, choice, 0.5) == jev_loss(logits, target, mask, choice, 0.0)
-    assert jev_loss(logits, target, mask, score, 0.5) > jev_loss(logits, target, mask, score, 0.0)
+    default, kl_only = JEVLoss(), JEVLoss({"kl": 1.0})
+    assert default(logits, target, mask, choice, label)[0] == kl_only(logits, target, mask, choice, label)[0]
+    assert default(logits, target, mask, score, label)[0] > kl_only(logits, target, mask, score, label)[0]
 
 
 def test_temperature_recovers_and_never_hurts():
@@ -178,8 +180,9 @@ def test_loss_weights_downweight_rows():
     b = JEVCollator(CharTokenizer())([ds[0], ds[1]])
     assert b["weight"].tolist() == pytest.approx([0.1, 1.0])
     logits = torch.tensor([[2.0, 0.0], [0.0, 0.0]])  # row 0 disagrees with its [0.5, 0.5] target
-    full = jev_loss(logits, b["target"], b["option_mask"], b["kind"], 0.0)
-    weighted = jev_loss(logits, b["target"], b["option_mask"], b["kind"], 0.0, b["weight"])
+    crit = JEVLoss({"kl": 1.0})
+    full, _ = crit(logits, b["target"], b["option_mask"], b["kind"], b["label"])
+    weighted, _ = crit(logits, b["target"], b["option_mask"], b["kind"], b["label"], b["weight"])
     assert weighted < full
 
 
@@ -362,3 +365,63 @@ def test_public_configs_have_no_personal_targets():
         cfg = load_config(f)
         assert cfg.train.hf_push in ("auto", None), f
         assert cfg.data.hf_dataset in (None, "SargeDev/jev-distill-corpus-v3"), f
+
+
+# -- configurable losses -------------------------------------------------------------
+
+
+def _batch():
+    torch.manual_seed(0)
+    logits = torch.randn(4, 3)
+    target = torch.softmax(torch.randn(4, 3), -1)
+    mask = torch.ones(4, 3, dtype=torch.bool)
+    kind = torch.tensor([KINDS.index(k) for k in ("choice", "score", "choice", "score")])
+    return logits, target, mask, kind, target.argmax(1)
+
+
+def test_default_loss_is_kl_plus_half_rps_on_scores():
+    logits, target, mask, kind, label = _batch()
+    loss, parts = JEVLoss()(logits, target, mask, kind, label)
+    is_score = (kind == KINDS.index("score")).float()
+    expected = (kl_per_example(logits, target, mask) + 0.5 * is_score * rps_per_example(logits, target, mask)).mean()
+    assert torch.allclose(loss, expected) and set(parts) == {"kl", "rps"}
+    assert JEVLoss().describe() == "1·kl + 0.5·rps[score]"
+
+
+def test_loss_options_ce_brier_and_kinds():
+    logits, target, mask, kind, label = _batch()
+    ce, _ = JEVLoss({"ce": 1.0})(logits, target, mask, kind, label)
+    assert torch.allclose(ce, F.cross_entropy(logits, label))
+    brier, _ = JEVLoss({"brier": 1.0})(logits, target, mask, kind, label)
+    assert torch.allclose(brier, ((torch.softmax(logits, -1) - target) ** 2).sum(-1).mean())
+    only_choice, _ = JEVLoss({"kl": {"weight": 1.0, "kinds": ["choice"]}})(logits, target, mask, kind, label)
+    is_choice = (kind == KINDS.index("choice")).float()
+    assert torch.allclose(only_choice, (kl_per_example(logits, target, mask) * is_choice).mean())
+
+
+@pytest.mark.parametrize("spec", [{}, {"nope": 1.0}, {"kl": 0.0}, {"rps": {"weight": 1, "kinds": ["bogus"]}},
+                                  {"kl": {"weight": 1, "typo": 2}}])
+def test_bad_loss_specs_rejected(spec):
+    with pytest.raises(ValueError):
+        JEVLoss(spec)
+
+
+def test_custom_loss_registration():
+    from jev.losses import LOSSES, register_loss
+
+    @register_loss("double_kl")
+    def double_kl(logits, target, option_mask, **_):
+        return 2 * kl_per_example(logits, target, option_mask)
+
+    try:
+        logits, target, mask, kind, label = _batch()
+        a, _ = JEVLoss({"double_kl": 1.0})(logits, target, mask, kind, label)
+        b, _ = JEVLoss({"kl": 2.0})(logits, target, mask, kind, label)
+        assert torch.allclose(a, b)
+    finally:
+        LOSSES.pop("double_kl")
+
+
+def test_loss_override_from_cli():
+    cfg = load_config("configs/jev-9b.yaml", ["train.loss={kl: 1.0, brier: 0.25}"])
+    assert JEVLoss(cfg.train.loss).describe() == "1·kl + 0.25·brier"
