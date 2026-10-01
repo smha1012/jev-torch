@@ -121,6 +121,10 @@ echo "WANDB_API_KEY=your_key" >> .env.local      # optional
 | `JEV_OVERRIDES` | optional personal settings, see below |
 | `TZ` | optional: timestamps in your time zone, e.g. `TZ=KST-9` for Korea (the pod clock is UTC) |
 
+Tokens set as **RunPod pod environment variables** are picked up too, even in terminals that do not
+inherit them (the scripts read them from the pod's environment). Without any token, the train script stops
+before starting, because nothing would be uploaded; add `--set train.hf_push=null` to train without uploads.
+
 `.env.local` is in `.gitignore`, so it never ends up in a commit. Values exported in the shell (or set in the
 RunPod dashboard) take precedence over the file.
 
@@ -178,7 +182,9 @@ started pid 4321 -> runs/jev-9b/train.log
   stop:    pkill -f 'jev\.(launch|train)'
 ```
 
-Training runs in the background with `nohup`, so closing the terminal or losing SSH does not stop it.
+The command then **shows the log live**. Training itself runs in the background in its own session, so
+`Ctrl+C`, closing the terminal or losing the connection only stops the display, never the training. Watch
+again any time with `tail -f runs/jev-9b/train.log`.
 
 **Common variations:**
 
@@ -424,7 +430,7 @@ bash scripts/runpod_setup.sh configs/jev-9b.yaml
 bash scripts/runpod_train.sh configs/jev-9b.yaml --set train.num_gpus=2
 ```
 
-**⑤ Watch the log.** `Ctrl+C` only stops watching; training keeps running.
+**⑤ Watch the log again** (④ already shows it). `Ctrl+C` only stops watching; training keeps running.
 
 ```bash
 tail -f runs/jev-9b/train.log

@@ -21,10 +21,8 @@ CONFIG="${1:-}"
 PY="${PYTHON:-python3}"
 export PIP_BREAK_SYSTEM_PACKAGES=1   # Ubuntu 24.04 marks the system Python "externally managed" (PEP 668)
 
-# .env.local first, so settings like TZ apply from the first line (pod environment variables still win).
-set +u
-if [ -f .env.local ]; then set -a; . ./.env.local; set +a; fi
-set -u
+# Tokens / TZ first: this shell's variables, RunPod pod variables, then .env.local (scripts/_env.sh).
+. scripts/_env.sh
 say() { printf '\n\033[1m[%s] %s\033[0m\n' "$(date '+%H:%M:%S %Z')" "$*"; }   # TZ=KST-9 for Korean time
 
 say "Environment"
@@ -138,9 +136,6 @@ for mod, why in [("fla", "REQUIRED for speed: Qwen3.5 gated-delta-rule kernels")
 PY
 
 say "Tokens"
-set +u
-if [ -f .env.local ]; then set -a; . ./.env.local; set +a; echo "  .env.local loaded"; fi
-set -u
 if [ -n "${HF_TOKEN:-}" ]; then
   # Training pushes checkpoints with this token (train.hf_push: auto), so it must be able to write.
   $PY - <<'PY'
@@ -156,7 +151,8 @@ if role == "read":
     print("  !! read-only token: Hub pushes will fail. Use a write token, or train with --set train.hf_push=null")
 PY
 else
-  echo "  HF_TOKEN      not set: checkpoints stay local (no Hub uploads), anonymous downloads"
+  echo "  !! HF_TOKEN not found (checked this shell, RunPod pod variables, .env.local)."
+  echo "     runpod_train.sh will refuse to start unless you set it or pass --set train.hf_push=null"
 fi
 if [ -n "${WANDB_API_KEY:-}" ]; then
   $PY -m wandb login --relogin "$WANDB_API_KEY" >/dev/null && echo "  WANDB_API_KEY OK"

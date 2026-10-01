@@ -277,7 +277,7 @@ bash scripts/runpod_setup.sh \
 bash scripts/runpod_train.sh \
   configs/jev-9b.yaml
 ```
-<sub>background run, auto-resume, Hub push</sub>
+<sub>live log, auto-resume, Hub push</sub>
 
 </td>
 </tr>
