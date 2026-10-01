@@ -95,6 +95,7 @@ echo "WANDB_API_KEY=your_key" >> .env.local      # optional
 | `HF_TOKEN` | write token: enables Hub uploads (leave empty to keep checkpoints local) |
 | `WANDB_API_KEY` | optional: without it, W&B logs offline |
 | `JEV_OVERRIDES` | optional personal settings, see below |
+| `TZ` | optional: timestamps in your time zone, e.g. `TZ=KST-9` for Korea (the pod clock is UTC) |
 
 `.env.local` is in `.gitignore`, so it never ends up in a commit. Values exported in the shell (or set in the
 RunPod dashboard) take precedence over the file.

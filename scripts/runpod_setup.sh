@@ -21,7 +21,11 @@ CONFIG="${1:-}"
 PY="${PYTHON:-python3}"
 export PIP_BREAK_SYSTEM_PACKAGES=1   # Ubuntu 24.04 marks the system Python "externally managed" (PEP 668)
 
-say() { printf '\n\033[1m[%s] %s\033[0m\n' "$(date +%H:%M:%S)" "$*"; }
+# .env.local first, so settings like TZ apply from the first line (pod environment variables still win).
+set +u
+if [ -f .env.local ]; then set -a; . ./.env.local; set +a; fi
+set -u
+say() { printf '\n\033[1m[%s] %s\033[0m\n' "$(date '+%H:%M:%S %Z')" "$*"; }   # TZ=KST-9 for Korean time
 
 say "Environment"
 $PY -c "import sys, torch; print(f'  python {sys.version.split()[0]} · torch {torch.__version__} · cuda {torch.version.cuda} · {torch.cuda.device_count()} GPU(s)')"
