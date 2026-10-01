@@ -7,6 +7,9 @@
 import argparse
 
 from jev import JEVExample, JEVPredictor, load_jsonl
+from jev.env import load_env
+
+load_env()  # HF_TOKEN from .env.local, needed for private Hub checkpoints
 
 p = argparse.ArgumentParser()
 p.add_argument("--model", required=True, help="Hub repo id or local checkpoint directory")

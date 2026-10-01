@@ -15,7 +15,7 @@
 [![License](https://img.shields.io/badge/license-Apache--2.0-3B82F6?style=flat-square)](LICENSE)
 
 **[Quick start](#-quick-start)** · **[How it works](#-how-it-works)** · **[Data format](#-data-format)** ·
-**[Hardware](#-configs--hardware)** · **[RunPod](#-training-on-runpod)** · **[Inference](#-inference)** ·
+**[Hardware](#-configs--hardware)** · **[RunPod guide](docs/runpod.md)** · **[Inference](#-inference)** ·
 **[Roadmap](#-roadmap)**
 
 </div>
@@ -232,6 +232,10 @@ rows; gradient accumulation is derived automatically.
 > before committing to a long run.
 
 ## 🏃 Training on RunPod
+
+> [!TIP]
+> 📘 **New to RunPod? Follow the [step-by-step guide](docs/runpod.md)**: choosing a GPU and disk, tokens,
+> setup, watching a run, resuming, publishing the result, and troubleshooting.
 
 Tested image: **`runpod/pytorch:1.0.2-cu1281-torch280-ubuntu2404`** (PyTorch 2.8, CUDA 12.8). Keep the repo on
 the network volume (`/workspace`) so checkpoints and caches survive restarts.
@@ -479,6 +483,7 @@ jev/
 └── env.py          # .env.local and JEV_OVERRIDES
 configs/            # one YAML per experiment
 scripts/            # RunPod setup / train, dataset mirroring
+docs/runpod.md      # step-by-step RunPod guide
 docs/assets/        # README artwork (python docs/assets/build.py)
 ```
 
