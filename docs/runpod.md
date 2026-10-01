@@ -15,8 +15,9 @@ It uses the two scripts in [`scripts/`](../scripts): `runpod_setup.sh` (once per
 7. [Watch the run](#7-watch-the-run)
 8. [Stop, resume, restart](#8-stop-resume-restart)
 9. [When training finishes](#9-when-training-finishes)
-10. [Troubleshooting](#10-troubleshooting)
-11. [Cheat sheet](#11-cheat-sheet)
+10. [Useful commands](#10-useful-commands)
+11. [Troubleshooting](#11-troubleshooting)
+12. [Cheat sheet](#12-cheat-sheet)
 
 ---
 
@@ -133,7 +134,8 @@ header:
 | **Unit tests** | `N passed` |
 | **GPU smoke test** | `smoke test passed`: 4 real training steps of Qwen3.5-0.8B, calibration and report on this GPU |
 
-If the smoke test fails, the script stops and shows the end of `/tmp/jev-smoke.log`. Nothing expensive has
+If the smoke test fails, the script stops and shows the end of `/tmp/jev-smoke.log`
+(`less /tmp/jev-smoke.log` for all of it). Nothing expensive has
 started yet, so this is the cheapest place to find a problem. To skip it on a pod you already validated:
 `SKIP_SMOKE=1 bash scripts/runpod_setup.sh`.
 
@@ -174,8 +176,9 @@ bash scripts/runpod_train.sh configs/jev-9b.yaml --set train.hf_push=null
 ## 7. Watch the run
 
 ```bash
-tail -f runs/jev-9b/train.log      # Ctrl+C stops watching, not training
-watch -n 5 nvidia-smi              # GPU memory and utilization
+tail -f runs/jev-9b/train.log         # Ctrl+C stops watching, not training
+watch -n 5 nvidia-smi                 # GPU memory and utilization
+pgrep -af 'jev\.(launch|train)'       # is training still running? (no output = stopped)
 ```
 
 The first lines show what the run is using. Check them once:
@@ -217,9 +220,20 @@ including each loss term (`loss/kl`, `loss/rps`).
 
 | Situation | What to do |
 |---|---|
-| Stop training | `pkill -f 'jev\.(launch|train)'` |
-| Continue after stopping, a crash, or a pod restart | run **the same** `runpod_train.sh` command again |
-| Pod was stopped and started again | `cd /workspace/jev-torch`, then the same command. The volume kept everything |
+| Stop training | `pkill -f 'jev\.(launch\|train)'` |
+| Continue after stopping or a crash (same pod) | run **the same** `runpod_train.sh` command again |
+| Pod was stopped and started again, or preempted | rerun the setup first, then the same train command (see below) |
+
+> [!WARNING]
+> Stopping a pod wipes its **container disk**, which includes the installed Python packages. `/workspace`
+> (code, checkpoints, Hugging Face cache) survives. After a restart, reinstall before resuming. With the
+> smoke test skipped and the model already cached, this takes a few minutes:
+>
+> ```bash
+> cd /workspace/jev-torch
+> SKIP_SMOKE=1 bash scripts/runpod_setup.sh
+> bash scripts/runpod_train.sh configs/jev-9b.yaml      # same command and flags as before
+> ```
 
 Progress is saved to `runs/<name>/last` every 250 steps (`train.save_every`), so at most 250 steps are
 repeated. The log confirms the resume point:
@@ -243,7 +257,22 @@ report -> runs/jev-9b/report.json
 ```
 
 **Results:** `runs/jev-9b/report.json` has the test and OOD metrics, before and after calibration, by kind
-and by domain family. For comparison, autotrust's JEV-9B reports about 90% top-1 agreement with the teacher
+and by domain family. A readable summary:
+
+```bash
+python3 - <<'PY'
+import json
+r = json.load(open("runs/jev-9b/report.json"))
+print("temperatures", r["temperature"])
+for split in ("test_set_30k", "ood"):
+    if split in r:
+        cal = r[split]["calibrated"]
+        print(f"{split:13s} all     acc={cal['acc']:.3f} kl={cal['kl']:.4f} ece={cal['ece']:.4f} n={cal['n']}")
+        for kind, m in cal["by_kind"].items():
+            print(f"{'':13s} {kind:7s} acc={m['acc']:.3f} kl={m['kl']:.4f} ece={m['ece']:.4f} n={m['n']}")
+PY
+```
+ For comparison, autotrust's JEV-9B reports about 90% top-1 agreement with the teacher
 on choice questions and a mean KL of about 0.019.
 
 **Try the model:**
@@ -251,6 +280,20 @@ on choice questions and a mean KL of about 0.019.
 ```bash
 python3 examples/inference.py --model runs/jev-9b/best          # local checkpoint
 python3 examples/inference.py --model your-name/jev-9b          # from the Hub (needs HF_TOKEN while private)
+```
+
+**W&B without a key?** The run was logged offline. Upload it once a key is set:
+
+```bash
+wandb login                                   # or put WANDB_API_KEY in .env.local
+wandb sync runs/jev-9b/wandb/offline-run-*
+```
+
+**Hub upload missing?** If there was no token during training, or the final push failed (the log says
+`Hub: ⚠️ push failed`), upload the calibrated checkpoint by hand (it reads `HF_TOKEN` from `.env.local`):
+
+```bash
+python3 -m jev.push_to_hub --ckpt runs/jev-9b/best --repo your-name/jev-9b --tag final
 ```
 
 **Freeze the versions** that just worked, so the next pod installs exactly the same set:
@@ -266,7 +309,27 @@ git add scripts/requirements.lock && git commit -m "Lock versions from a success
 **Publishing:** the Hub repo starts private. Make it public in the repo's *Settings* on huggingface.co when
 you are ready.
 
-## 10. Troubleshooting
+## 10. Useful commands
+
+| Task | Command |
+|---|---|
+| Update the code | `cd /workspace/jev-torch && git pull` |
+| Rerun setup without the smoke test | `SKIP_SMOKE=1 bash scripts/runpod_setup.sh` |
+| Is training running? | `pgrep -af 'jev\.(launch\|train)'` |
+| Follow the log | `tail -f runs/jev-9b/train.log` |
+| Last validation results | `grep "val acc" runs/jev-9b/train.log \| tail -5` |
+| GPU usage | `watch -n 5 nvidia-smi` |
+| Disk space | `df -h /workspace` and `du -sh /workspace/hf_cache runs/*` |
+| Remove an old run | `rm -rf runs/<old-run>` (local only; its Hub repo is untouched) |
+| Score your own questions | `python3 -m jev.predict --ckpt runs/jev-9b/best --input my.jsonl` |
+| Evaluate on labeled data | `python3 -m jev.predict --ckpt runs/jev-9b/best --input labeled.jsonl --metrics` |
+| Upload a checkpoint by hand | `python3 -m jev.push_to_hub --ckpt runs/jev-9b/best --repo your-name/jev-9b` |
+| Sync an offline W&B run | `wandb sync runs/jev-9b/wandb/offline-run-*` |
+| Smoke-test log | `less /tmp/jev-smoke.log` |
+
+The input format for `jev.predict` is described in the [README](../README.md#-data-format).
+
+## 11. Troubleshooting
 
 | Message or symptom | Cause | Fix |
 |---|---|---|
@@ -281,10 +344,11 @@ you are ready.
 | `No space left on device` | volume too small | resize the volume (section 2) or delete old `runs/*` and `$HF_HOME` models |
 | very low `tok/s` | slow kernels, or a GPU smaller than planned | check the smoke-test warnings; compare with section 2 |
 | the run restarts from step 0 unexpectedly | `output_dir` changed, so `last/` was not found | use the same `train.output_dir` (and `--set` flags) as the original run |
+| `ModuleNotFoundError: No module named 'jev'` (or `fla`) after a restart | the container disk was wiped | `SKIP_SMOKE=1 bash scripts/runpod_setup.sh` (section 8) |
 
 Full logs: training in `runs/<name>/train.log`, smoke test in `/tmp/jev-smoke.log`.
 
-## 11. Cheat sheet
+## 12. Cheat sheet
 
 ```bash
 # once per pod
@@ -292,16 +356,23 @@ cd /workspace && git clone https://github.com/smha1012/jev-torch.git && cd jev-t
 cp .env.sample .env.local && nano .env.local
 bash scripts/runpod_setup.sh configs/jev-9b.yaml
 
+# after a pod restart (packages are gone, /workspace is kept)
+cd /workspace/jev-torch && git pull
+SKIP_SMOKE=1 bash scripts/runpod_setup.sh
+
 # train (rerun the same line to resume)
 bash scripts/runpod_train.sh configs/jev-9b.yaml [--set train.num_gpus=4 ...]
 
 # watch / stop
 tail -f runs/jev-9b/train.log
 watch -n 5 nvidia-smi
+pgrep -af 'jev\.(launch|train)'
 pkill -f 'jev\.(launch|train)'
 
 # afterwards
-cat runs/jev-9b/report.json
 python3 examples/inference.py --model runs/jev-9b/best
+python3 -m jev.push_to_hub --ckpt runs/jev-9b/best --repo your-name/jev-9b --tag final   # only if the auto push failed
+wandb sync runs/jev-9b/wandb/offline-run-*                                               # only if W&B ran offline
 pip freeze > scripts/requirements.lock
+df -h /workspace
 ```
