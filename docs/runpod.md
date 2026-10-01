@@ -85,16 +85,19 @@ Already cloned on this volume? Update instead: `cd /workspace/jev-torch && git p
 
 ## 4. Add your tokens
 
-```bash
-cp .env.sample .env.local
-nano .env.local            # or vi
-```
+No editor needed. The tokens are typed hidden and do not end up in your shell history:
 
 ```bash
-HF_TOKEN=hf_...            # write token: enables Hub uploads (leave empty to keep checkpoints local)
-WANDB_API_KEY=...          # optional: without it, W&B logs offline
-JEV_OVERRIDES=             # optional personal settings, see below
+read -rsp "HF_TOKEN: " T && echo "HF_TOKEN=$T" > .env.local && echo
+read -rsp "WANDB_API_KEY (Enter to skip): " W && echo "WANDB_API_KEY=$W" >> .env.local && echo
+sed 's/=.*/=***/' .env.local      # check which keys are set, values masked
 ```
+
+| Key | |
+|---|---|
+| `HF_TOKEN` | write token: enables Hub uploads (leave empty to keep checkpoints local) |
+| `WANDB_API_KEY` | optional: without it, W&B logs offline |
+| `JEV_OVERRIDES` | optional personal settings, see below |
 
 `.env.local` is in `.gitignore`, so it never ends up in a commit. Values exported in the shell (or set in the
 RunPod dashboard) take precedence over the file.
@@ -107,7 +110,7 @@ Anything you would pass as `--set` can live here, so the shared configs stay unt
 
 ```bash
 # read your own snapshot of the dataset, push to a differently named repo, turn W&B off
-JEV_OVERRIDES="data.hf_dataset=your-name/jev-distill-corpus-v3 train.hf_push=your-name/jev-9b-v2 train.wandb_project=null"
+echo 'JEV_OVERRIDES="data.hf_dataset=your-name/jev-distill-corpus-v3 train.hf_push=your-name/jev-9b-v2 train.wandb_project=null"' >> .env.local
 ```
 
 They are applied before `--set` and printed at the start of the log.
@@ -353,7 +356,8 @@ Full logs: training in `runs/<name>/train.log`, smoke test in `/tmp/jev-smoke.lo
 ```bash
 # once per pod
 cd /workspace && git clone https://github.com/smha1012/jev-torch.git && cd jev-torch
-cp .env.sample .env.local && nano .env.local
+read -rsp "HF_TOKEN: " T && echo "HF_TOKEN=$T" > .env.local && echo
+read -rsp "WANDB_API_KEY (Enter to skip): " W && echo "WANDB_API_KEY=$W" >> .env.local && echo
 bash scripts/runpod_setup.sh configs/jev-9b.yaml
 
 # after a pod restart (packages are gone, /workspace is kept)

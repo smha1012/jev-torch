@@ -247,10 +247,10 @@ the network volume (`/workspace`) so checkpoints and caches survive restarts.
 **① Configure**
 
 ```bash
-cp .env.sample .env.local
-vi .env.local
+read -rsp "HF_TOKEN: " T \
+ && echo "HF_TOKEN=$T" > .env.local
 ```
-<sub><code>HF_TOKEN</code> (write) · <code>WANDB_API_KEY</code></sub>
+<sub>add <code>WANDB_API_KEY</code> the same way (optional)</sub>
 
 </td>
 <td width="33%" valign="top">
@@ -304,7 +304,7 @@ Keep your own dataset mirror or Hub repo out of the shared configs by putting ov
 (never committed). They are applied before `--set` and printed in the log:
 
 ```bash
-JEV_OVERRIDES="data.hf_dataset=your-name/jev-distill-corpus-v3 train.hf_push=your-name/jev-9b-v2"
+echo 'JEV_OVERRIDES="data.hf_dataset=your-name/jev-distill-corpus-v3 train.hf_push=your-name/jev-9b-v2"' >> .env.local
 ```
 
 </details>
