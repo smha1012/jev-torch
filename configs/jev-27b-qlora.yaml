@@ -6,6 +6,12 @@ model:
   gradient_checkpointing: true
   load_in_4bit: true
 data:
+  # SargeDev/jev-distill-corpus-v3: 741k rows of TypeSafe Jev 1.13 output distributions (65 domains).
+  source: jev_distill
+  train_split: train                  # 655,806 rows
+  val_split: validation               # checkpoint selection (subset: train.val_max_examples)
+  calib_split: calibration            # per-kind temperature fitting
+  eval_splits: [test_set_30k, ood]    # held-out benchmark + out-of-domain rows
   # autotrust down-weights yuri_v1 (148k placeholder labels); 0.1 is our choice, the exact value is unpublished.
   loss_weights: {source: {yuri_v1: 0.1}}
 train:

@@ -4,6 +4,7 @@ model:
   name: Qwen/Qwen3.5-0.8B
   gradient_checkpointing: false
 data:
+  source: jev_distill                 # SargeDev/jev-distill-corpus-v3, small random subsets below
   max_train_examples: 256
   max_eval_examples: 128
   max_length: 512

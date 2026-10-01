@@ -21,14 +21,25 @@ from .schema import JEVExample, load_jsonl
 
 SourceFn = Callable[[DataConfig, str], list[JEVExample]]
 SOURCES: dict[str, SourceFn] = {}
+SOURCE_DATASETS: dict[str, str] = {}  # source name -> Hugging Face dataset id, when it reads one
 
 
-def register_source(name: str):
+def register_source(name: str, hf_dataset: str | None = None):
     def deco(fn: SourceFn) -> SourceFn:
         SOURCES[name] = fn
+        if hf_dataset:
+            SOURCE_DATASETS[name] = hf_dataset
         return fn
 
     return deco
+
+
+def describe_source(cfg: DataConfig) -> str:
+    """Human-readable name of the data a config trains on, e.g. for logs and model cards."""
+    if cfg.source == "jsonl":
+        return f"local JSONL files in {cfg.path}"
+    hf = SOURCE_DATASETS.get(cfg.source)
+    return f"{cfg.source} (https://huggingface.co/datasets/{hf})" if hf else cfg.source
 
 
 def load_split(cfg: DataConfig, split: str, limit: int | None = None, seed: int = 0) -> list[JEVExample]:
@@ -54,7 +65,7 @@ def jsonl(cfg: DataConfig, split: str) -> list[JEVExample]:
     return load_jsonl(Path(cfg.path) / f"{split}.jsonl")
 
 
-@register_source("jev_distill")
+@register_source("jev_distill", hf_dataset="SargeDev/jev-distill-corpus-v3")
 def jev_distill(cfg: DataConfig, split: str) -> list[JEVExample]:
     """SargeDev/jev-distill-corpus-v3: 741k rows of TypeSafe Jev 1.13 output distributions.
 
@@ -74,7 +85,7 @@ def jev_distill(cfg: DataConfig, split: str) -> list[JEVExample]:
     ]
 
 
-@register_source("commonsense_qa")
+@register_source("commonsense_qa", hf_dataset="tau/commonsense_qa")
 def commonsense_qa(cfg: DataConfig, split: str) -> list[JEVExample]:
     """tau/commonsense_qa: hard labels, 5 options. A template for adapting plain multiple-choice data.
 

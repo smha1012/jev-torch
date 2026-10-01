@@ -23,7 +23,7 @@ from .distributed import cleanup, pick_dtype, setup
 from .env import load_env
 from .hub import HubUploader
 from .model import JEVModel
-from .sources import load_split
+from .sources import describe_source, load_split
 from .trainer import Trainer
 
 
@@ -73,7 +73,12 @@ def main(argv=None):
     train, val, calib, evals = load_all()
     if ctx.is_main:
         ctx.barrier()
-    ctx.print(f"train={len(train)} val={len(val)} calib={len(calib or [])} "
+    d = cfg.data
+    ctx.print(f"data={describe_source(d)}")
+    ctx.print(f"  splits: train={d.train_split} val={d.val_split} calib={d.calib_split} eval={d.eval_splits}"
+              + (f" include={d.include}" if d.include else "") + (f" exclude={d.exclude}" if d.exclude else "")
+              + (f" loss_weights={d.loss_weights}" if d.loss_weights else ""))
+    ctx.print(f"  rows:   train={len(train)} val={len(val)} calib={len(calib or [])} "
               + " ".join(f"{k}={len(v)}" for k, v in evals.items()))
 
     # CUDA: load weights straight onto this rank's GPU (a 27B model must not be staged in CPU RAM x N ranks).

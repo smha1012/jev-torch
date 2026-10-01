@@ -59,7 +59,12 @@ def build_model_card(ckpt: Path, repo_id: str, status: str | None = None) -> str
         front["datasets"] = ["SargeDev/jev-distill-corpus-v3"]
 
     metrics = _metrics_table(report)
+    from .config import DataConfig
+    from .sources import describe_source
+
+    data_cfg = DataConfig(**{k: v for k, v in data.items() if k in DataConfig.__dataclass_fields__})
     settings = [
+        f"- **Training data:** {describe_source(data_cfg)}",
         f"- **Base model:** [`{base}`](https://huggingface.co/{base}) (frozen) + LoRA r={meta['model']['lora_r']}, "
         f"α={meta['model']['lora_alpha']} + 24-slot fp32 decision head",
         f"- **Loss:** KL to the teacher distribution + {train.get('rps_weight', 0.5)} · RPS on `score` rows",
