@@ -1,38 +1,97 @@
-# jev-torch
+<div align="center">
 
-Train **JEV-style decision models** in plain PyTorch: an LLM reads a *state*, a *question* and a list of
-*options*, runs **one forward pass**, and returns a **calibrated probability for every option**, with no text generation.
+# ⚖️ jev-torch
 
-```
+**An unofficial PyTorch implementation for training JEV-style decision models.**<br>
+An LLM reads a *state*, a *question* and a list of *options*, runs **one forward pass**,<br>
+and returns a **calibrated probability for every option**, with no text generation.
+
+[![Python](https://img.shields.io/badge/python-3.10%2B-3776AB?logo=python&logoColor=white)](https://www.python.org/)
+[![PyTorch](https://img.shields.io/badge/PyTorch-2.5%2B-EE4C2C?logo=pytorch&logoColor=white)](https://pytorch.org/)
+[![Transformers](https://img.shields.io/badge/%F0%9F%A4%97%20Transformers-5.17%2B-FFD21E)](https://github.com/huggingface/transformers)
+[![Dataset](https://img.shields.io/badge/%F0%9F%A4%97%20Dataset-jev--distill--corpus--v3-FFD21E)](https://huggingface.co/datasets/SargeDev/jev-distill-corpus-v3)
+[![W&B](https://img.shields.io/badge/Weights_%26_Biases-ready-FFBE00?logo=weightsandbiases&logoColor=black)](https://wandb.ai/)
+[![License](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
+
+[Why](#-why-decision-models) •
+[Quick start](#-quick-start) •
+[Data format](#-data-format) •
+[Recipe](#-training-recipe) •
+[Hardware](#%EF%B8%8F-configs--hardware) •
+[RunPod](#%EF%B8%8F-training-on-runpod) •
+[Inference](#-inference) •
+[Roadmap](#%EF%B8%8F-roadmap)
+
+</div>
+
+```text
 [kind] choice
-[state] The nightly feed is byte-identical to yesterday; additionally arrived 3 hours late. ...
+[state] The nightly feed is byte-identical to yesterday; additionally arrived 3 hours late.
 [question] Root cause for this scenario.
 [options]
 A. producer_change
 B. schema_drift
 C. infrastructure
 D. expected_variation
-[decision]:  ──► Qwen3.5 (+LoRA) ─► last hidden ─► 24-slot fp32 head ─► softmax(logits / T_kind)
-                                                                        A .48  B .01  C .48  D .03
+[decision]:
+                         ⬇  one forward pass
+              A 0.48   B 0.01   C 0.48   D 0.03      ← calibrated, sums to 1
 ```
 
-The recipe follows the published [autotrust/JEV-9B](https://huggingface.co/autotrust/JEV-9B) training card
-and trains on the open [JEV distillation corpus](https://huggingface.co/datasets/SargeDev/jev-distill-corpus-v3)
-(741k rows of TypeSafe Jev 1.13 output distributions, 65 domains).
+> [!NOTE]
+> **Status: early.** The full pipeline (training → calibration → evaluation → inference) is implemented and
+> unit-tested. Multi-GPU and 4-bit training on CUDA have not been validated end to end yet, and we have not
+> published our own trained weights or results. The numbers below are from the
+> [autotrust/JEV](https://huggingface.co/autotrust/JEV-9B) model cards, whose recipe this project reproduces.
 
-| | |
-|---|---|
-| Backbone | any HF causal LM; configs for Qwen3.5 0.8B / 2B / 9B / 27B (text tower only) |
-| Trainable | LoRA r16 on every projection (linear-attention, attention, MLP) + 24-slot fp32 head |
-| Head init | slot *i* = LM-head row of its verbalizer token (`false true 0-5 A-P`), so step 0 = zero-shot |
-| Loss | KL(teacher ‖ model) over active slots + 0.5 · RPS on ordinal `score` rows |
-| Calibration | one temperature per kind (noul / choice / score), fit on the calibration split |
-| Scale | single GPU, multi-GPU data parallel (torchrun), 4-bit QLoRA; resumable checkpoints |
-| Data | same corpus and ~1 epoch for every size, as autotrust did for 9B (4.75k steps) and 27B (5k steps) |
+---
 
-## Data format
+## 💡 Why decision models?
 
-JSONL, one example per line (the corpus schema):
+Most LLM pipelines ask a big model to *write* an answer, then parse it. Many steps are really **typed
+decisions**: *Is this document relevant? Which team should get this ticket? How severe is this incident,
+0–5?* A JEV-style model answers them as a **System 1**:
+
+| | 🐢 Generative LLM ("System 2") | ⚡ JEV-style decision model ("System 1") |
+|---|---|---|
+| Output | free text you have to parse | a probability for each option you supplied |
+| Cost | many decoding steps | **one forward pass** |
+| Confidence | hard to trust | **calibrated**: 0.9 means right ~9 times in 10 |
+| Use it for | open-ended reasoning | gating, routing, triage, relevance, LLM-as-judge at scale |
+
+Calibration is what makes it practical. You can write rules like *"act if p > 0.85, otherwise escalate to the
+big model or a human"*.
+
+## ✨ Features
+
+- 🧠 **Any Hugging Face causal LM.** Ready configs for **Qwen3.5 0.8B / 2B / 9B / 27B**, including its hybrid
+  linear-attention layers. Only the text tower is loaded.
+- 🎯 **24-slot decision head** initialized from the LM head's verbalizer rows, so step 0 is already a
+  sensible zero-shot model.
+- 📉 **Distillation losses**: KL to the teacher's full distribution, plus RPS for ordinal scores.
+- 🌡️ **Per-kind temperature scaling** fit on a held-out calibration split.
+- 🚀 **Scales from laptop to multi-GPU**: CPU / Apple MPS / single GPU / `torchrun` data parallel / 4-bit QLoRA.
+- 🔁 **Preemption-safe**: resumable checkpoints (optimizer, scheduler, sampler position, W&B run).
+- 📊 **Weights & Biases** logging, plus `report.json` with metrics by kind and domain family.
+- ⚙️ **One YAML per experiment**, including the GPU count; override any field from the CLI.
+- 🧩 **Pluggable data sources**: bring your own JSONL or register a dataset adapter in a few lines.
+
+## 🚀 Quick start
+
+```bash
+git clone https://github.com/smha1012/jev-torch.git && cd jev-torch
+pip install -e ".[dev]"              # on NVIDIA machines: pip install -e ".[cuda,dev]"
+pytest -q                            # fast tests, no downloads
+
+# 5-minute smoke test on a laptop (Qwen3.5-0.8B, CPU or Apple MPS)
+python -m jev.launch --config configs/debug.yaml
+python -m jev.predict --ckpt runs/debug/best --input examples/example.jsonl
+```
+
+## 📦 Data format
+
+One JSON object per line. This is the schema of the
+[JEV distillation corpus](https://huggingface.co/datasets/SargeDev/jev-distill-corpus-v3), so it trains out of the box.
 
 ```json
 {"kind": "choice",
@@ -43,131 +102,262 @@ JSONL, one example per line (the corpus schema):
  "domain": "inventory_supply"}
 ```
 
-| field | | |
-|---|---|---|
-| `kind` | | `noul` (exactly 2 options: false-like, true-like) · `score` (up to 6 ordered levels, 0–5) · `choice` (2–16 options). Default `choice` |
-| `state` | ✓ | the situation / record (may be `""`) |
-| `question` | ✓ | what is being decided |
-| `options` | ✓ | the menu; probabilities are a distribution over exactly these |
-| `target` | one of | teacher probability per option (soft label, auto-normalized): **the main training signal** |
-| `label` | these | hard label index; derived as `argmax(target)` when absent |
-| `domain`, `meta` | | reporting / filtering; unknown keys are folded into `meta` |
+| Field | Required | Description |
+|---|:---:|---|
+| `kind` | | `noul` (yes/no, exactly 2 options) · `choice` (2–16 options) · `score` (ordered 0–5). Default `choice` |
+| `state` | ✅ | the situation, record or context (may be `""`) |
+| `question` | ✅ | what is being decided |
+| `options` | ✅ | the menu; probabilities form a distribution over exactly these |
+| `target` | ✅* | teacher probability per option (soft label, auto-normalized). **The main training signal** |
+| `label` | ✅* | hard label index; derived as `argmax(target)` when absent |
+| `domain`, `meta` | | for filtering and reporting; unknown keys are folded into `meta` |
 
-See `examples/example.jsonl`.
+<sub>* one of `target` / `label`.</sub>
 
-## Quick start
+Soft `target`s teach the model **how uncertain to be**, not just which option wins. If several humans
+labeled an item, use their vote shares; if you have a teacher model, use its output distribution.
 
-```bash
-pip install -e ".[dev]"            # add ",cuda" on NVIDIA machines
-pytest -q                          # fast tests, no downloads
+## 🧪 Training recipe
 
-python -m jev.launch --config configs/debug.yaml          # laptop smoke test (Qwen3.5-0.8B, CPU/MPS)
-python -m jev.predict --ckpt runs/debug/best --input examples/example.jsonl
+The defaults follow the published [JEV-9B](https://huggingface.co/autotrust/JEV-9B) and
+[JEV-27B](https://huggingface.co/autotrust/JEV-27B) training cards.
+
+```mermaid
+flowchart LR
+    P["prompt<br/>[kind] [state] [question]<br/>[options] [decision]:"] --> B["Qwen3.5 backbone<br/>frozen bf16 + LoRA r16"]
+    B --> H["last-token hidden state"]
+    H --> S["24-slot fp32 head<br/>false·true | 0–5 | A–P"]
+    S --> M["keep the active slots<br/>of this row's kind"]
+    M --> T["÷ temperature per kind"]
+    T --> O["softmax → P(option)"]
 ```
 
-## Configs and GPUs
+| Component | Setting |
+|---|---|
+| 🦴 Backbone | Qwen3.5 text tower, bf16, frozen |
+| 🔧 LoRA | r=16, α=32, dropout 0.05 on `in_proj_qkv, in_proj_z, out_proj, q/k/v/o_proj, gate/up/down_proj` (40.1M params for 9B, 108.8M for 27B: same as JEV) |
+| 🎯 Head | 24 fp32 slots: `false/true` (noul), `0–5` (score), `A–P` (choice), initialized from the LM-head rows of those tokens |
+| 📉 Loss | KL(teacher ‖ model) over active slots + 0.5 · RPS on `score` rows |
+| 🔀 Augmentation | 30% random permutation of `choice` options (targets follow) |
+| ✂️ Context | max 1,024 tokens; an over-long state keeps its first 60% and last 40% |
+| 🏃 Optimization | 128 rows/step, AdamW β=(0.9, 0.98), LoRA lr 1e-4, head lr 2e-4, cosine with 3% warmup, clip 1.0, ~1 epoch |
+| 🌡️ Calibration | one temperature per kind, fit on the `calibration` split |
+| ⚖️ Placeholder rows | the corpus's 148k `yuri_v1` placeholder labels get loss weight 0.1 (autotrust down-weights them; their exact weight is unpublished) |
 
-Everything, including the GPU count, is set in the YAML config. Override any field from the command line:
+<details>
+<summary><b>📚 About the dataset</b></summary>
+
+[`SargeDev/jev-distill-corpus-v3`](https://huggingface.co/datasets/SargeDev/jev-distill-corpus-v3): 741k
+rows, 65 domains, Apache-2.0.
+
+| Stream | Rows | What it is |
+|---|---:|---|
+| `yuri_v3` | 498k | synthetic operational scenarios, labeled with the full output distributions of TypeSafe Jev 1.13 |
+| `yuri_v1` | 148k | memory-relevance yes/no pairs from open QA datasets (placeholder labels) |
+| `openjev_v2` | 95k | [Open-Jev](https://huggingface.co/datasets/ZefanCai/Open-Jev) rows (CC0), programmatic labels |
+
+Splits: `train` (656k), `validation`, `calibration`, `test`, `ood`, and **`test_set_30k`**, the stratified,
+leakage-checked benchmark used for final evaluation.
+
+</details>
+
+## 🖥️ Configs & hardware
+
+Every experiment is one YAML file in [`configs/`](configs), **including the number of GPUs**. Any field can be
+overridden from the command line:
 
 ```bash
 python -m jev.launch --config configs/jev-9b.yaml --set train.num_gpus=4 train.max_steps=2000
 ```
 
-`train.num_gpus > 1` makes the launcher start one process per GPU through `torchrun` (data parallel; each
-GPU holds a full model copy). `global_batch_size` (128 rows/step) stays fixed; gradient accumulation is
-derived as `global_batch_size / (micro_batch_size × num_gpus)`.
+With `train.num_gpus > 1` the launcher re-executes itself under `torchrun` (data parallel, one full model copy
+per GPU). The global batch stays at 128 rows; gradient accumulation is derived automatically.
 
-| config | backbone (trainable) | GPU memory | measured / estimated time |
+| Config | Backbone (trainable) | GPU memory | Time for ~1 epoch |
 |---|---|---|---|
-| `debug.yaml` | Qwen3.5-0.8B | laptop | minutes (256 rows) |
-| `jev-2b.yaml` | 1.9B (15.6M) | ~10 GB (est.) | est. ~1.5 h on H100, ~4 h on L40S / A100 |
-| `jev-9b.yaml` | 7.9B (40.1M) | ~25 GB (est.) | **measured ~3 h on 1× B200**; est. ~6 h on 1× H100 |
-| `jev-27b.yaml` | 25.6B (108.8M) | ~60 GB at micro-batch 8 (est.); autotrust peak 79 GB | **measured ~9.2 h on 1× B200**; est. ~20 h on 1× H100, ~3 h on 8× H100 |
-| `jev-27b-qlora.yaml` | 25.6B NF4 (108.8M) | ~30 GB (est.) | not measured; slower than bf16 |
+| `debug.yaml` | Qwen3.5-0.8B | laptop | ⏱️ minutes (256 rows) |
+| `jev-2b.yaml` | 1.9B (15.6M) | ~10 GB · est. | ~1.5 h on H100 · est. |
+| `jev-9b.yaml` | 7.9B (40.1M) | ~25 GB · est. | ✅ **~3 h on 1× B200** (measured by autotrust) · ~6 h on 1× H100 · est. |
+| `jev-27b.yaml` | 25.6B (108.8M) | ~60 GB · est. (autotrust peak: 79 GB) | ✅ **~9.2 h on 1× B200** (measured by autotrust) · ~3 h on 8× H100 · est. |
+| `jev-27b-qlora.yaml` | 25.6B in 4-bit (108.8M) | ~30 GB · est. | slower than bf16 · not measured |
 
-"Measured" numbers are from the autotrust/JEV-9B and JEV-27B model cards (same corpus, same recipe,
-~1 epoch). Everything else is an estimate: memory from parameter and activation counts (gradient
-checkpointing, no LM-head logits), time from the measured B200 throughput scaled by peak bf16 FLOPs at the
-same utilization (~17%). Treat estimates as ±2x. The trainer prints `tok/s` and an ETA every `log_every`
-steps, so run a few minutes and read them before committing to a long run.
+> [!TIP]
+> Estimates assume gradient checkpointing and the measured B200 throughput scaled by peak bf16 FLOPs. Treat
+> them as ±2×. The trainer prints **tokens/s and an ETA** every few steps, so run for a few minutes before
+> committing to a long job.
 
-Placeholder labels: 148k `yuri_v1` rows carry placeholder targets and autotrust down-weights them.
-The configs set `data.loss_weights: {source: {yuri_v1: 0.1}}`. The exact weight is not published.
+## ☁️ Training on RunPod
 
-## RunPod
-
-Base image: **`runpod/pytorch:1.0.2-cu1281-torch280-ubuntu2404`** (Runpod PyTorch 2.8.0). Put the repo on
-the network volume (`/workspace`) so checkpoints and the HF cache survive pod restarts.
+Tested image: **`runpod/pytorch:1.0.2-cu1281-torch280-ubuntu2404`** (PyTorch 2.8.0, CUDA 12.8).
+Keep the repo on the network volume (`/workspace`) so checkpoints and caches survive pod restarts.
 
 ```bash
-cd /workspace && git clone <repo-url> jev-torch && cd jev-torch
-cp .env.sample .env.local && vi .env.local          # HF_TOKEN, WANDB_API_KEY (both optional)
-bash scripts/runpod_setup.sh configs/jev-9b.yaml     # install (keeps the image's torch), checks, pre-download
-bash scripts/runpod_train.sh configs/jev-9b.yaml     # background run, log in runs/jev-9b/train.log
+cd /workspace && git clone https://github.com/smha1012/jev-torch.git && cd jev-torch
+
+cp .env.sample .env.local && vi .env.local         # 🔑 HF_TOKEN, WANDB_API_KEY (both optional)
+bash scripts/runpod_setup.sh configs/jev-9b.yaml    # 📦 install, check kernels, pre-download model + data
+bash scripts/runpod_train.sh configs/jev-9b.yaml    # 🏃 background run → runs/jev-9b/train.log
 ```
 
-**Weights & Biases:** on by default (`train.wandb_project: jev-torch`; also `wandb_entity`, `wandb_run_name`,
-`wandb_tags`). Logged: train loss, grad norm, lr, tokens/s, val metrics every `eval_every`, and the final
-test/ood metrics (by kind and family) plus per-kind temperatures in the run summary. The run id is kept in
-`runs/<name>/wandb_id`, so a resumed training continues the same W&B run. Without `WANDB_API_KEY` it logs
-offline (`wandb sync runs/<name>/wandb` later). Set `train.wandb_project: null` to disable.
+- 🔒 `runpod_setup.sh` pins the image's own torch build so pip never replaces it, and installs
+  `flash-linear-attention`, the fast kernel Qwen3.5 needs. Without it a slow pure-torch path is used.
+- 🔁 `runpod_train.sh` always resumes: if the pod is preempted, run the same command again and training
+  continues from `runs/<name>/last`.
+- 🧪 First time on a new setup? Do a cheap end-to-end check, including multi-GPU, before a long run:
+  ```bash
+  bash scripts/runpod_train.sh configs/debug.yaml --set train.num_gpus=2
+  ```
 
-`runpod_train.sh` always passes `--resume`: if the pod is preempted, run the same command again and training
-continues from `runs/<name>/last` (saved every `save_every` steps). Use a new `train.output_dir` for a new
-experiment.
+### 📊 Weights & Biases
 
-## Outputs
+On by default (`train.wandb_project: jev-torch`). Logged: loss, grad norm, learning rate, tokens/s, validation
+metrics, and the final test / OOD metrics by kind and family, together with the fitted temperatures.
+A resumed run continues the same W&B run. Without `WANDB_API_KEY` it logs offline (`wandb sync` later);
+set `train.wandb_project: null` to turn it off.
 
-```
+### 📁 Outputs
+
+```text
 runs/jev-9b/
-  config.yaml     resolved config
-  log.jsonl       loss, grad norm, lr, tokens/s, val metrics
-  last/           resumable state (LoRA + head + optimizer + scheduler + sampler position)
-  best/           best val-KL checkpoint, with per-kind temperatures after calibration
-  report.json     val history + test_set_30k / ood metrics, uncalibrated vs calibrated, by kind and family
+├── config.yaml     # fully resolved config
+├── log.jsonl       # step-level training + validation log
+├── last/           # resumable state: LoRA, head, optimizer, scheduler, sampler position
+├── best/           # best validation-KL checkpoint, with per-kind temperatures
+└── report.json     # test_set_30k / ood metrics, uncalibrated vs calibrated, by kind and family
 ```
 
-Metrics: `acc` = top-1 agrees with the teacher's argmax · `kl` = KL to the teacher distribution ·
-`tv` = total-variation distance · `ece` = calibration error · `brier`.
+| Metric | Meaning |
+|---|---|
+| `acc` | top-1 agrees with the teacher's top option |
+| `kl` | KL divergence to the teacher distribution (lower is better) |
+| `tv` | total-variation distance to the teacher distribution |
+| `ece` | expected calibration error: does 0.8 confidence mean 80% correct? |
+| `brier` | squared error of the probability vector |
 
-Use a checkpoint from Python:
+## 🔮 Inference
 
 ```python
 from jev import JEVPredictor
+
 jev = JEVPredictor("runs/jev-9b/best")
-jev.predict(kind="noul", state="Canary p99 latency is up 40% after the deploy.",
-            question="Should the rollout be paused?", options=["false", "true"])
-# {'false': 0.08, 'true': 0.92}
+
+jev.predict(
+    kind="noul",
+    state="The canary shows p99 latency up 40% after the deploy.",
+    question="Should the rollout be paused?",
+    options=["false", "true"],
+)
+# {'false': 0.08, 'true': 0.92}   (illustrative)
 ```
 
-## Code map
+From the command line:
 
-| file | |
-|---|---|
-| `jev/schema.py` | `JEVExample`, validation, JSONL I/O |
-| `jev/sources.py` | data-source registry: `jev_distill`, `jsonl` (your own files), `commonsense_qa` |
-| `jev/collate.py` | prompt, 24-slot mapping, 60/40 head-tail state truncation, length-grouped DDP sampler |
-| `jev/model.py` | `JEVModel`: backbone + LoRA + head; `build` (fresh) / `load` / `save` |
-| `jev/losses.py` | KL, RPS, per-kind temperature scaling, metrics |
-| `jev/trainer.py` | `Trainer`: DDP training, sharded eval, checkpoint/resume, calibration, report |
-| `jev/launch.py` | reads `train.num_gpus`, re-executes under torchrun |
-| `jev/predict.py` | `JEVPredictor` + CLI |
+```bash
+python -m jev.predict --ckpt runs/jev-9b/best --input my_questions.jsonl            # per-example probabilities
+python -m jev.predict --ckpt runs/jev-9b/best --input labeled.jsonl --metrics       # aggregate metrics
+```
 
-## Extending
+## 🧩 Extending
 
-- **Your own data in this format:** `data.source: jsonl` and `data.path: <dir>` with `train/validation/calibration/<eval>.jsonl`.
-- **A new dataset:** register an adapter; the trainer does not change.
-  ```python
-  from jev import register_source, JEVExample
-  @register_source("my_data")
-  def my_data(cfg, split):
-      return [JEVExample(kind="choice", state=r.text, question=r.q, options=r.opts, target=r.probs) for r in ...]
-  ```
-- **Filtering:** `data.include: {source: [openjev_v2]}`, `data.exclude: {family: [theology]}`.
-- **Continuing from a trained model:** `JEVModel.load(ckpt, is_trainable=True)` returns a model the same
-  `Trainer` accepts. This is the hook for domain fine-tuning on top of a general JEV.
+<details>
+<summary><b>Use your own data</b></summary>
 
-## License
+Write `train.jsonl`, `validation.jsonl`, `calibration.jsonl` (and any eval splits) in the format above, then:
 
-Code: Apache-2.0. The corpus is Apache-2.0 (its Open-Jev stream CC0); its `yuri_v3` labels are outputs of
-the closed TypeSafe Jev 1.13 model. Check that model's terms before commercial use of derived weights.
+```yaml
+data:
+  source: jsonl
+  path: data/my_dataset
+  eval_splits: [test]
+```
+
+</details>
+
+<details>
+<summary><b>Add a dataset adapter</b></summary>
+
+```python
+from jev import JEVExample, register_source
+
+@register_source("my_data")
+def my_data(cfg, split):
+    rows = ...  # load however you like
+    return [JEVExample(kind="choice", state=r.text, question=r.q,
+                       options=r.options, target=r.probs) for r in rows]
+```
+
+Then set `data.source: my_data`. The trainer does not change.
+
+</details>
+
+<details>
+<summary><b>Filter or re-weight the corpus</b></summary>
+
+```yaml
+data:
+  include: {source: [openjev_v2, yuri_v3]}
+  exclude: {family: [theology]}
+  loss_weights: {source: {yuri_v1: 0.1}}
+```
+
+</details>
+
+<details>
+<summary><b>Continue training from a checkpoint</b></summary>
+
+`JEVModel.load(ckpt, is_trainable=True)` returns a model the same `Trainer` accepts. This is the hook for
+fine-tuning a general JEV on a specific domain.
+
+</details>
+
+## 🗂️ Project layout
+
+```text
+jev/
+├── schema.py       # JEVExample: validation, JSONL I/O
+├── sources.py      # data-source registry: jev_distill, jsonl, commonsense_qa
+├── collate.py      # prompt, 24-slot mapping, head/tail truncation, length-grouped DDP sampler
+├── model.py        # JEVModel: backbone + LoRA + head; build / load / save
+├── losses.py       # KL, RPS, temperature scaling, metrics
+├── trainer.py      # Trainer: DDP, sharded eval, checkpoint/resume, calibration, W&B
+├── launch.py       # reads train.num_gpus, re-executes under torchrun
+├── train.py        # training entry point
+└── predict.py      # JEVPredictor + CLI
+configs/            # one YAML per experiment
+scripts/            # RunPod setup / train
+tests/              # fast unit tests (no downloads)
+```
+
+## 🗺️ Roadmap
+
+- [x] JEV recipe: 24-slot head, KL + RPS, per-kind calibration
+- [x] Qwen3.5 0.8B → 27B configs, multi-GPU data parallel, QLoRA
+- [x] Resumable training, W&B, RunPod scripts
+- [ ] End-to-end validation on multi-GPU CUDA
+- [ ] Publish our own trained checkpoints and `test_set_30k` results
+- [ ] Kind-stratified batches and token-budget micro-batches (as in JEV-9B)
+- [ ] Push checkpoints to the Hugging Face Hub
+- [ ] FSDP for backbones that do not fit on one GPU
+
+Contributions are welcome. Please open an issue first for larger changes, and run `pytest -q` before sending
+a pull request.
+
+## 🙏 Acknowledgements
+
+- [autotrust/JEV](https://huggingface.co/autotrust/JEV-9B) for openly documenting the training recipe this
+  project reproduces.
+- [SargeDev/jev-distill-corpus-v3](https://huggingface.co/datasets/SargeDev/jev-distill-corpus-v3) and
+  [ZefanCai/Open-Jev](https://huggingface.co/datasets/ZefanCai/Open-Jev) for the training data.
+- [cexll/train-your-first-jev](https://github.com/cexll/train-your-first-jev) for the approachable introduction to JEV-style models.
+- [Qwen](https://huggingface.co/Qwen) for the backbones, and 🤗 Transformers / PEFT for the plumbing.
+
+**Unofficial:** this is an independent re-implementation. It is not affiliated with or endorsed by
+TypeSafe AI (makers of Jev) or autotrust.
+
+## 📄 License
+
+Code is released under the [Apache-2.0 License](LICENSE).
+
+> [!IMPORTANT]
+> The corpus is Apache-2.0 (its Open-Jev stream is CC0), but its `yuri_v3` labels are outputs of the closed
+> TypeSafe Jev 1.13 model. Check that model's terms before any commercial use of weights trained on them.

@@ -1,7 +1,7 @@
 [project]
 name = "jev-torch"
 version = "0.1.0"
-description = "Train JEV-style calibrated decision models (state + question + options -> probabilities) in PyTorch"
+description = "Unofficial PyTorch implementation for training JEV-style calibrated decision models"
 readme = "README.md"
 license = "Apache-2.0"
 requires-python = ">=3.10"
