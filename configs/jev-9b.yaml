@@ -9,8 +9,10 @@ model:
   name: Qwen/Qwen3.5-9B
   gradient_checkpointing: true
 data:
-  # SargeDev/jev-distill-corpus-v3: 741k rows of TypeSafe Jev 1.13 output distributions (65 domains).
+  # JEV distillation corpus v3: 741k rows of TypeSafe Jev 1.13 output distributions (65 domains).
   source: jev_distill
+  hf_dataset: seungminh/jev-distill-corpus-v3   # snapshot of SargeDev/jev-distill-corpus-v3
+  hf_revision: src-fc99c6357a9f                 # pinned: byte-identical to source commit fc99c63
   train_split: train                  # 655,806 rows
   val_split: validation               # checkpoint selection (subset: train.val_max_examples)
   calib_split: calibration            # per-kind temperature fitting

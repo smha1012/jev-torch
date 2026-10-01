@@ -38,8 +38,16 @@ def describe_source(cfg: DataConfig) -> str:
     """Human-readable name of the data a config trains on, e.g. for logs and model cards."""
     if cfg.source == "jsonl":
         return f"local JSONL files in {cfg.path}"
-    hf = SOURCE_DATASETS.get(cfg.source)
-    return f"{cfg.source} (https://huggingface.co/datasets/{hf})" if hf else cfg.source
+    hf = hub_dataset(cfg)
+    if not hf:
+        return cfg.source
+    rev = f" @ {cfg.hf_revision}" if cfg.hf_revision else ""
+    return f"{cfg.source} (https://huggingface.co/datasets/{hf}{rev})"
+
+
+def hub_dataset(cfg: DataConfig) -> str | None:
+    """The Hub dataset id a config actually reads: data.hf_dataset if set, else the source default."""
+    return cfg.hf_dataset or SOURCE_DATASETS.get(cfg.source)
 
 
 def load_split(cfg: DataConfig, split: str, limit: int | None = None, seed: int = 0) -> list[JEVExample]:
@@ -68,13 +76,14 @@ def jsonl(cfg: DataConfig, split: str) -> list[JEVExample]:
 @register_source("jev_distill", hf_dataset="SargeDev/jev-distill-corpus-v3")
 def jev_distill(cfg: DataConfig, split: str) -> list[JEVExample]:
     """SargeDev/jev-distill-corpus-v3: 741k rows of TypeSafe Jev 1.13 output distributions.
+    data.hf_dataset can point at a snapshot with the same files (e.g. seungminh/jev-distill-corpus-v3).
 
     Splits: train (656k) / validation / calibration / test / ood / test_set_30k (the held-out
     benchmark, stratified by family and kind). Rows carry `family` and `source` in meta.
     """
     from datasets import load_dataset
 
-    ds = load_dataset("SargeDev/jev-distill-corpus-v3", split=split)
+    ds = load_dataset(hub_dataset(cfg), split=split, revision=cfg.hf_revision)
     return [
         JEVExample(
             id=r["id"], kind=r["kind"], state=r["state"], question=r["question"],

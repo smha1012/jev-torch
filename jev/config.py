@@ -34,6 +34,8 @@ class ModelConfig:
 class DataConfig:
     source: str = "jev_distill"  # a name registered in jev.sources
     path: str | None = None  # used by the `jsonl` source: directory holding <split>.jsonl
+    hf_dataset: str | None = None  # override the Hub dataset a source reads (e.g. a mirror/snapshot)
+    hf_revision: str | None = None  # pin a Hub dataset commit / tag / branch for reproducibility
     train_split: str = "train"
     val_split: str = "validation"
     calib_split: str = "calibration"

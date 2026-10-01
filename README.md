@@ -9,7 +9,7 @@ and returns a **calibrated probability for every option**, with no text generati
 [![Python](https://img.shields.io/badge/python-3.10%2B-3776AB?logo=python&logoColor=white)](https://www.python.org/)
 [![PyTorch](https://img.shields.io/badge/PyTorch-2.5%2B-EE4C2C?logo=pytorch&logoColor=white)](https://pytorch.org/)
 [![Transformers](https://img.shields.io/badge/%F0%9F%A4%97%20Transformers-5.17%2B-FFD21E)](https://github.com/huggingface/transformers)
-[![Dataset](https://img.shields.io/badge/%F0%9F%A4%97%20Dataset-jev--distill--corpus--v3-FFD21E)](https://huggingface.co/datasets/SargeDev/jev-distill-corpus-v3)
+[![Dataset](https://img.shields.io/badge/%F0%9F%A4%97%20Dataset-jev--distill--corpus--v3-FFD21E)](https://huggingface.co/datasets/seungminh/jev-distill-corpus-v3)
 [![W&B](https://img.shields.io/badge/Weights_%26_Biases-ready-FFBE00?logo=weightsandbiases&logoColor=black)](https://wandb.ai/)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
 
@@ -155,6 +155,12 @@ rows, 65 domains, Apache-2.0.
 | `yuri_v3` | 498k | synthetic operational scenarios, labeled with the full output distributions of TypeSafe Jev 1.13 |
 | `yuri_v1` | 148k | memory-relevance yes/no pairs from open QA datasets (placeholder labels) |
 | `openjev_v2` | 95k | [Open-Jev](https://huggingface.co/datasets/ZefanCai/Open-Jev) rows (CC0), programmatic labels |
+
+**Pinned snapshot.** The configs read [`seungminh/jev-distill-corpus-v3`](https://huggingface.co/datasets/seungminh/jev-distill-corpus-v3)
+at tag `src-fc99c6357a9f`: a byte-identical copy of the source at commit `fc99c63`, so training stays
+reproducible even if the source changes. Point `data.hf_dataset` back at `SargeDev/jev-distill-corpus-v3` to
+read the original. Make your own snapshot with
+`python scripts/mirror_dataset.py --src SargeDev/jev-distill-corpus-v3 --dst <you>/jev-distill-corpus-v3`.
 
 Splits: `train` (656k), `validation`, `calibration`, `test`, `ood`, and **`test_set_30k`**, the stratified,
 leakage-checked benchmark used for final evaluation.

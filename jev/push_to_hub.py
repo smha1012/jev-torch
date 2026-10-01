@@ -55,14 +55,16 @@ def build_model_card(ckpt: Path, repo_id: str, status: str | None = None) -> str
         "pipeline_tag": "text-classification",
         "tags": ["jev", "jev-torch", "decision-model", "calibration", "lora", "distillation"],
     }
-    if data.get("source", "jev_distill") == "jev_distill":
-        front["datasets"] = ["SargeDev/jev-distill-corpus-v3"]
-
-    metrics = _metrics_table(report)
     from .config import DataConfig
-    from .sources import describe_source
+    from .sources import hub_dataset
 
     data_cfg = DataConfig(**{k: v for k, v in data.items() if k in DataConfig.__dataclass_fields__})
+    if hub_dataset(data_cfg):
+        front["datasets"] = [hub_dataset(data_cfg)]
+
+    metrics = _metrics_table(report)
+    from .sources import describe_source
+
     settings = [
         f"- **Training data:** {describe_source(data_cfg)}",
         f"- **Base model:** [`{base}`](https://huggingface.co/{base}) (frozen) + LoRA r={meta['model']['lora_r']}, "

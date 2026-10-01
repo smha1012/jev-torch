@@ -4,7 +4,9 @@ model:
   name: Qwen/Qwen3.5-0.8B
   gradient_checkpointing: false
 data:
-  source: jev_distill                 # SargeDev/jev-distill-corpus-v3, small random subsets below
+  source: jev_distill                 # small random subsets below
+  hf_dataset: seungminh/jev-distill-corpus-v3   # snapshot of SargeDev/jev-distill-corpus-v3
+  hf_revision: src-fc99c6357a9f                 # pinned: byte-identical to source commit fc99c63
   max_train_examples: 256
   max_eval_examples: 128
   max_length: 512
