@@ -424,7 +424,7 @@ so the card describes it correctly.)
 | Remove an old run | `rm -rf runs/<old-run>` (local only; its Hub repo is untouched) |
 | Compare a model with TypeSafe Jev (teacher agreement) | `python3 -m jev.evaluate --model runs/jev-9b/best` |
 | Accuracy on ground truth next to TypeSafe Jev | `python3 -m jev.bench --model runs/jev-9b/best --out runs/jev-9b/bench.json` |
-| Chart of those results | `pip install matplotlib && python3 -m jev.plot_bench runs/jev-9b/bench.json` |
+| Chart of those results | `pip install seaborn && python3 -m jev.plot_bench runs/jev-9b/bench.json` |
 | Score your own questions | `python3 -m jev.predict --ckpt runs/jev-9b/best --input my.jsonl` |
 | Evaluate on labeled data | `python3 -m jev.predict --ckpt runs/jev-9b/best --input labeled.jsonl --metrics` |
 | Upload a checkpoint by hand | `python3 -m jev.push_to_hub --ckpt runs/jev-9b/best --repo your-name/jev-9b` |

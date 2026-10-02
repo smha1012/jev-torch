@@ -369,7 +369,7 @@ the predictions TypeSafe's hosted Jev 1.13.0 returned for the very same cases.
 
 ```bash
 python -m jev.bench --model your-name/jev-9b --out bench.json
-pip install matplotlib && python -m jev.plot_bench bench.json      # -> bench.png (add --theme dark)
+pip install seaborn && python -m jev.plot_bench bench.json      # -> bench.png (add --theme dark)
 ```
 
 It prints accuracy and ECE per slice for both systems, scored case by case with the same code (recomputing

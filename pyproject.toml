@@ -27,7 +27,7 @@ cuda = [
     "wandb>=0.30,<0.31",
 ]
 dev = ["pytest>=8,<10"]
-plot = ["matplotlib>=3.8,<4"]
+plot = ["seaborn>=0.13,<0.14"]          # pulls in matplotlib and pandas
 
 [project.scripts]
 jev-train = "jev.launch:main"

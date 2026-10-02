@@ -4,7 +4,7 @@
     python3 -m jev.plot_bench bench.json --out bench.svg --theme dark
 
 Two panels on the same slices: accuracy (higher is better) and ECE (lower is better), each comparing
-this model with TypeSafe Jev 1.13.0. Needs matplotlib (pip install matplotlib).
+this model with TypeSafe Jev 1.13.0. Needs seaborn (pip install seaborn).
 """
 
 from __future__ import annotations
@@ -28,50 +28,52 @@ def plot(data: dict, out: Path, theme: str = "light", model_name: str | None = N
 
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
+    import pandas as pd
+    import seaborn as sns
 
     c = THEMES[theme]
     slices = data["slices"]
     # Group by question kind, then strongest-to-weakest for the teacher, so gaps read top to bottom.
     names = sorted(slices, key=lambda s: (KIND_ORDER.get(slices[s]["kind"], 9), -slices[s]["teacher"]["acc"]))
-    labels = [f"{s}  ·  {slices[s]['kind']}" for s in names]
+    order = [f"{s}  ·  {slices[s]['kind']}" for s in names]
     ours_label = model_name or Path(str(data.get("model", "this model"))).name or "this model"
     teacher_label = f"TypeSafe {data.get('teacher_run', 'Jev')}"
+    systems = [ours_label, teacher_label]
 
-    plt.rcParams.update({"font.size": 10, "font.family": "DejaVu Sans"})
+    # Long-form table: one row per (slice, system).
+    df = pd.DataFrame([
+        {"slice": label, "system": system, "acc": slices[name][who]["acc"], "ece": slices[name][who]["ece"]}
+        for name, label in zip(names, order)
+        for system, who in zip(systems, ("ours", "teacher"))
+    ])
+
+    sns.set_theme(style="whitegrid", font="DejaVu Sans", font_scale=0.95, rc={
+        "figure.facecolor": c["surface"], "axes.facecolor": c["surface"], "savefig.facecolor": c["surface"],
+        "grid.color": c["grid"], "axes.edgecolor": c["grid"], "text.color": c["text"],
+        "axes.labelcolor": c["muted"], "xtick.color": c["muted"], "ytick.color": c["text"],
+    })
     fig, axes = plt.subplots(1, 2, figsize=(12, 0.52 * len(names) + 2.4), sharey=True,
                              gridspec_kw={"width_ratios": [1.6, 1]})
-    fig.patch.set_facecolor(c["surface"])
-
-    h, gap = 0.36, 0.04  # thin bars, a small surface gap between the pair
-    y = list(range(len(names)))
+    palette = {ours_label: c["ours"], teacher_label: c["teacher"]}
     panels = [("acc", "Accuracy (higher is better)", axes[0], "{:.0%}"),
               ("ece", "Calibration error, ECE (lower is better)", axes[1], "{:.3f}")]
     for key, title, ax, fmt in panels:
-        ax.set_facecolor(c["surface"])
-        ours = [slices[s]["ours"][key] for s in names]
-        theirs = [slices[s]["teacher"][key] for s in names]
-        top = max(ours + theirs)
-        b1 = ax.barh([v - (h + gap) / 2 for v in y], ours, height=h, color=c["ours"], label=ours_label)
-        b2 = ax.barh([v + (h + gap) / 2 for v in y], theirs, height=h, color=c["teacher"], label=teacher_label)
-        for bars, vals in ((b1, ours), (b2, theirs)):
-            for bar, val in zip(bars, vals):
-                ax.text(bar.get_width() + top * 0.012, bar.get_y() + bar.get_height() / 2, fmt.format(val),
-                        va="center", ha="left", fontsize=8.5, color=c["muted"])
+        sns.barplot(data=df, x=key, y="slice", hue="system", order=order, hue_order=systems, palette=palette,
+                    orient="h", width=0.76, gap=0.1, legend=False, ax=ax,
+                    saturation=1, linewidth=0)  # keep the validated colours; no outlines
+        for bars in ax.containers:
+            ax.bar_label(bars, labels=[fmt.format(v) for v in bars.datavalues], padding=4, fontsize=8.5,
+                         color=c["muted"])
+        top = df[key].max()
         ax.set_xlim(0, 1.09 if key == "acc" else top * 1.2)  # room for the value labels
-        ax.set_title(title, loc="left", fontsize=11, color=c["text"], pad=10)
-        ax.grid(axis="x", color=c["grid"], linewidth=0.8)
-        ax.set_axisbelow(True)
-        for side in ("top", "right", "left"):
-            ax.spines[side].set_visible(False)
-        ax.spines["bottom"].set_color(c["grid"])
-        ax.tick_params(colors=c["muted"], length=0)
         if key == "acc":
             ax.set_xticks([0, 0.2, 0.4, 0.6, 0.8, 1.0])
             ax.xaxis.set_major_formatter(matplotlib.ticker.PercentFormatter(1.0, decimals=0))
-
-    axes[0].set_yticks(y)
-    axes[0].set_yticklabels(labels, color=c["text"])
-    axes[0].invert_yaxis()
+        ax.set_title(title, loc="left", fontsize=11, color=c["text"], pad=10)
+        ax.set(xlabel="", ylabel="")
+        ax.grid(axis="y", visible=False)
+        sns.despine(ax=ax, left=True)
+        ax.tick_params(length=0)
 
     o, t = data["overall"]["ours"], data["overall"]["teacher"]
     height_in = fig.get_figheight()
@@ -82,10 +84,11 @@ def plot(data: dict, out: Path, theme: str = "light", model_name: str | None = N
     fig.text(0.01, top_y - line, f"All {o['n']:,} cases: accuracy {o['acc']:.1%} vs {t['acc']:.1%} "
              f"({o['acc'] / t['acc']:.1%} of Jev's) · ECE {o['ece']:.3f} vs {t['ece']:.3f}",
              ha="left", va="top", fontsize=10, color=c["muted"])
-    fig.legend(handles=[b1, b2], loc="upper left", ncol=2, frameon=False, bbox_to_anchor=(0.003, top_y - 2 * line),
+    handles = [matplotlib.patches.Patch(color=palette[s], label=s) for s in systems]
+    fig.legend(handles=handles, loc="upper left", ncol=2, frameon=False, bbox_to_anchor=(0.003, top_y - 2 * line),
                labelcolor=c["text"], handlelength=1.2, handleheight=0.8)
     fig.tight_layout(rect=(0, 0, 1, top_y - 3.2 * line))
-    fig.savefig(out, dpi=160, facecolor=c["surface"])
+    fig.savefig(out, dpi=160)
     plt.close(fig)
 
 
