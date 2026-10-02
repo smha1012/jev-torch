@@ -350,7 +350,7 @@ python3 -m jev.push_to_hub --ckpt runs/jev-9b/best --repo your-name/jev-9b --tag
 **Freeze the versions** that just worked, so the next pod installs exactly the same set:
 
 ```bash
-pip freeze > scripts/requirements.lock
+uv pip freeze --system > scripts/requirements.lock
 git add scripts/requirements.lock && git commit -m "Lock versions from a successful run" && git push
 ```
 
@@ -424,7 +424,7 @@ so the card describes it correctly.)
 | Remove an old run | `rm -rf runs/<old-run>` (local only; its Hub repo is untouched) |
 | Compare a model with TypeSafe Jev (teacher agreement) | `python3 -m jev.evaluate --model runs/jev-9b/best` |
 | Accuracy on ground truth next to TypeSafe Jev | `python3 -m jev.bench --model runs/jev-9b/best --out runs/jev-9b/bench.json` |
-| Chart of those results | `pip install seaborn && python3 -m jev.plot_bench runs/jev-9b/bench.json` |
+| Chart of those results | `python3 -m jev.plot_bench runs/jev-9b/bench.json` |
 | Score your own questions | `python3 -m jev.predict --ckpt runs/jev-9b/best --input my.jsonl` |
 | Evaluate on labeled data | `python3 -m jev.predict --ckpt runs/jev-9b/best --input labeled.jsonl --metrics` |
 | Upload a checkpoint by hand | `python3 -m jev.push_to_hub --ckpt runs/jev-9b/best --repo your-name/jev-9b` |
@@ -437,8 +437,8 @@ The input format for `jev.predict` is described in the [README](../README.md#-da
 
 | Message or symptom | Cause | Fix |
 |---|---|---|
-| `!! torch changed 2.8.0 -> ...` | pip replaced the image's torch | use the image from section 2; do not `pip install torch` yourself |
-| `missing fla` or `falling back to its reference PyTorch implementation` for `chunk_gated_delta_rule` | fast Qwen3.5 kernels not installed | `pip install "flash-linear-attention>=0.5,<0.6"`, then rerun the setup |
+| `!! torch changed 2.8.0 -> ...` | an install replaced the image's torch | use the image from section 2; do not install torch yourself (pip or uv) |
+| `missing fla` or `falling back to its reference PyTorch implementation` for `chunk_gated_delta_rule` | fast Qwen3.5 kernels not installed | rerun `bash scripts/runpod_setup.sh` (it installs them with uv) |
 | `the HF token belongs to 'X', which cannot write to "Y"` | `hf_push` names someone else's namespace | use `hf_push: auto`, or a token of that account |
 | `cannot create or access ... It needs WRITE access` | read-only token | create a write token, or `--set train.hf_push=null` |
 | `CUDA out of memory` | micro-batch too large for this GPU | halve `train.micro_batch_size` (16 → 8 → 4). It must divide `128 / num_gpus` |
@@ -511,7 +511,7 @@ python3 examples/inference.py --model runs/jev-9b/best
 **⑨ Freeze the package versions** (after the first successful run)
 
 ```bash
-pip freeze > scripts/requirements.lock
+uv pip freeze --system > scripts/requirements.lock
 ```
 
 ---

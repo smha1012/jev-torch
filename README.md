@@ -136,7 +136,8 @@ for this question's kind enter the softmax. A temperature per kind, fit after tr
 
 ```bash
 git clone https://github.com/smha1012/jev-torch.git && cd jev-torch
-pip install -e ".[dev]"            # on NVIDIA machines: pip install -e ".[cuda,dev]"
+uv venv --python 3.12 && source .venv/bin/activate
+uv pip install -e ".[dev,plot]"    # on NVIDIA machines: ".[cuda,dev,plot]"
 pytest -q                          # fast tests, no downloads
 
 python -m jev.launch --config configs/debug.yaml                              # tiny run on a laptop
@@ -291,13 +292,13 @@ It is built to fail in minutes, not after hours of GPU time:
 
 | Step | Guards against |
 |---|---|
-| 🔒 pins the image's torch and **re-checks** it after install | pip swapping in a torch built for another CUDA |
+| 🔒 installs everything with **uv** into the image's Python, torch pinned, then **re-checks** it | a resolver swapping in a torch built for another CUDA |
 | 📌 bounded dependency ranges, or the exact `scripts/requirements.lock` | a new release on pod-creation day breaking yesterday's run |
 | ⚡ installs and **imports** `flash-linear-attention` | Qwen3.5 silently falling back to a very slow path |
 | 🔑 validates `HF_TOKEN` (account, role) and logs in to W&B | a bad token surfacing at the first checkpoint push |
 | 🧪 **GPU smoke test**: 4 real steps of Qwen3.5-0.8B, on 2 GPUs when available | kernel, bf16, DDP or pipeline bugs (`SKIP_SMOKE=1` to skip) |
 
-After the first successful run, freeze the versions: `pip freeze > scripts/requirements.lock`.
+After the first successful run, freeze the versions: `uv pip freeze --system > scripts/requirements.lock`.
 
 </details>
 
@@ -369,7 +370,7 @@ the predictions TypeSafe's hosted Jev 1.13.0 returned for the very same cases.
 
 ```bash
 python -m jev.bench --model your-name/jev-9b --out bench.json
-pip install seaborn && python -m jev.plot_bench bench.json      # -> bench.png (add --theme dark)
+python -m jev.plot_bench bench.json                               # -> bench.png (add --theme dark)
 ```
 
 It prints accuracy and ECE per slice for both systems, scored case by case with the same code (recomputing

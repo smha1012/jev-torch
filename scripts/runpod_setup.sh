@@ -14,7 +14,7 @@
 #    torch built for a different CUDA. torch is pinned to the image version, and re-checked after install.
 # ⚠️ Every dependency has an upper bound (pyproject.toml): an unbounded package installs whatever is newest
 #    on the day the pod is created and can break a run that worked yesterday. After the first successful
-#    run, freeze the exact set:  pip freeze > scripts/requirements.lock  (this script then installs from it).
+#    run, freeze the exact set:  uv pip freeze --system > scripts/requirements.lock  (this script then installs it).
 set -euo pipefail
 cd "$(dirname "$0")/.."
 CONFIG="${1:-}"
@@ -54,14 +54,17 @@ TORCH_VER="$($PY -c 'import torch; print(torch.__version__.split("+")[0])')"
 echo "torch==${TORCH_VER}" > /tmp/jev-constraints.txt
 echo "  torch==${TORCH_VER}"
 
-say "Python dependencies"
-$PY -m pip install -q --upgrade pip
+say "Python dependencies (uv)"
+# Everything installs with uv, into the image's own Python (so its CUDA torch stays), torch pinned.
+command -v uv >/dev/null || $PY -m pip install -q uv          # bootstrap uv once
+PYBIN="$(command -v "$PY")"
+UV_INSTALL=(uv pip install --quiet --python "$PYBIN" --system --break-system-packages -c /tmp/jev-constraints.txt)
 if [ -f scripts/requirements.lock ]; then
   echo "  installing the frozen set from scripts/requirements.lock"
   grep -v -E '^(torch|nvidia-|triton|-e |jev-torch)' scripts/requirements.lock > /tmp/jev-lock.txt
-  $PY -m pip install -q -c /tmp/jev-constraints.txt -r /tmp/jev-lock.txt
+  "${UV_INSTALL[@]}" -r /tmp/jev-lock.txt
 fi
-$PY -m pip install -q -c /tmp/jev-constraints.txt -e ".[cuda,dev]"
+"${UV_INSTALL[@]}" -e ".[cuda,dev,plot]"
 $PY -c "import transformers, peft, fla; print(f'  transformers {transformers.__version__} · peft {peft.__version__} · flash-linear-attention {fla.__version__}')"
 
 say "Hopper check: fla gradients need TileLang + nvcc here (fla issue #640)"
@@ -72,7 +75,7 @@ NEED_TILELANG="$($PY -c 'import fla.utils as u; print(int(u.IS_NVIDIA_HOPPER and
 find_cuda_home() { for d in /usr/local/cuda /usr/local/cuda-*; do [ -x "$d/bin/nvcc" ] && { echo "$d"; return; }; done; }
 if [ "$NEED_TILELANG" = "1" ]; then
   echo "  Hopper GPU + Triton $($PY -c 'import triton; print(triton.__version__)'): installing tilelang and nvcc"
-  $PY -m pip install -q -c /tmp/jev-constraints.txt "tilelang>=0.1.15,<0.2"
+  "${UV_INSTALL[@]}" "tilelang>=0.1.15,<0.2"
   if ! command -v nvcc >/dev/null && [ -z "$(find_cuda_home)" ]; then
     CUV="$($PY -c 'import torch; print(torch.version.cuda.replace(".", "-"))')"        # e.g. 12-8
     apt-get install -y -qq "cuda-nvcc-$CUV" "cuda-cudart-dev-$CUV" >/dev/null 2>&1 || {
@@ -94,7 +97,7 @@ ok = B.is_available() and B.is_enabled()
 print(f"  tilelang backend: {'active' if ok else 'NOT usable'}")
 if not ok:
     sys.exit("  !! fla would stop with 'Triton >= 3.4.0 and < 3.7.1 on Hopper GPUs produces incorrect results'.\n"
-             "     Needs `pip install tilelang` and an nvcc (CUDA toolkit) on PATH or in CUDA_HOME.")
+             "     Needs tilelang (uv pip install tilelang) and an nvcc (CUDA toolkit) on PATH or in CUDA_HOME.")
 PY
 else
   echo "  not needed on this GPU / Triton version"
@@ -104,7 +107,7 @@ say "Optional: causal-conv1d"
 # Small speedup for Qwen3.5's short convolution; transformers falls back to torch without it.
 # Building needs nvcc; without it, skip instead of failing slowly.
 if command -v nvcc >/dev/null; then
-  timeout 1200 $PY -m pip install -q -c /tmp/jev-constraints.txt --no-build-isolation causal-conv1d \
+  timeout 1200 "${UV_INSTALL[@]}" --no-build-isolation causal-conv1d \
     && echo "  installed" || echo "  (not installed; using the torch fallback)"
 else
   echo "  skipped: no nvcc in this image (torch fallback is used)"
@@ -209,6 +212,6 @@ Setup done. Start training (runs in the background, survives SSH disconnects):
 Watch the first few log lines: tok/s and ETA tell you if the GPU choice is right,
 and nvidia-smi shows the memory headroom for micro_batch_size.
 After the first successful run, freeze the versions:
-  pip freeze > scripts/requirements.lock && git add scripts/requirements.lock
+  uv pip freeze --system > scripts/requirements.lock && git add scripts/requirements.lock
 ────────────────────────────────────────────────────────────
 EOF

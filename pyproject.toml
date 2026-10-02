@@ -7,7 +7,7 @@ license = "Apache-2.0"
 requires-python = ">=3.10"
 # Every dependency has an upper bound: an unbounded one installs whatever is newest on the day the pod
 # is created and can break a run that worked yesterday. Ranges start at the versions tested together.
-# After a successful run, freeze the exact set: pip freeze > scripts/requirements.lock
+# After a successful run, freeze the exact set: uv pip freeze --system > scripts/requirements.lock
 dependencies = [
     "torch>=2.5",                       # on RunPod the image's own torch is pinned; never upgraded
     "transformers>=5.17,<5.18",         # Qwen3.5 support; moves fast, so pinned to the tested minor
