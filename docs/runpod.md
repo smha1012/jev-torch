@@ -425,6 +425,8 @@ so the card describes it correctly.)
 | Compare a model with TypeSafe Jev (teacher agreement) | `python3 -m jev.evaluate --model runs/jev-9b/best` |
 | Accuracy on ground truth next to TypeSafe Jev | `python3 -m jev.bench --model runs/jev-9b/best --out runs/jev-9b/bench.json` |
 | Chart of those results | `python3 -m jev.plot_bench runs/jev-9b/bench.json` |
+| Untrained backbone on JevBench (baseline) | `python3 -m jev.bench --zero_shot Qwen/Qwen3.5-9B --out runs/jev-9b/bench-zeroshot.json` |
+| Chart with that baseline | `python3 -m jev.plot_bench runs/jev-9b/bench.json --baseline runs/jev-9b/bench-zeroshot.json` |
 | Score your own questions | `python3 -m jev.predict --ckpt runs/jev-9b/best --input my.jsonl` |
 | Evaluate on labeled data | `python3 -m jev.predict --ckpt runs/jev-9b/best --input labeled.jsonl --metrics` |
 | Upload a checkpoint by hand | `python3 -m jev.push_to_hub --ckpt runs/jev-9b/best --repo your-name/jev-9b` |

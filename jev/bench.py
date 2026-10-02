@@ -3,6 +3,7 @@
     python3 -m jev.bench --model runs/jev-9b/best
     python3 -m jev.bench --model your-name/jev-9b --out bench.json
     python3 -m jev.bench --model runs/jev-9b/best --limit 50          # quick look
+    python3 -m jev.bench --zero_shot Qwen/Qwen3.5-9B --out bench-zeroshot.json   # untrained baseline
 
 Data: the public JevBench release (https://huggingface.co/datasets/Leanmcp/jevbench, pinned below):
 cases built from public datasets with gold answers, plus the predictions TypeSafe's hosted Jev 1.13.0
@@ -122,7 +123,10 @@ def teacher_probs(pred: dict, keys: list) -> list[float] | None:
 
 def main():
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    p.add_argument("--model", required=True, help="checkpoint directory or Hub repo id")
+    who = p.add_mutually_exclusive_group(required=True)
+    who.add_argument("--model", help="checkpoint directory or Hub repo id")
+    who.add_argument("--zero_shot", metavar="BASE_MODEL",
+                     help="evaluate an untrained base model with a fresh JEV head (e.g. Qwen/Qwen3.5-9B), as a baseline")
     p.add_argument("--slices", nargs="+", default=SLICES)
     p.add_argument("--limit", type=int, help="cases per slice, for a quick look")
     p.add_argument("--batch_size", type=int, default=16)
@@ -133,7 +137,12 @@ def main():
 
     load_env()
     teacher = {r["case_id"]: r for r in _read_jsonl(_download(f"predictions/{TEACHER_RUN}/predictions.jsonl"))}
-    jev = JEVPredictor(args.model, device=args.device, batch_size=args.batch_size, max_length=args.max_length)
+    if args.zero_shot:
+        jev = JEVPredictor.zero_shot(args.zero_shot, device=args.device, batch_size=args.batch_size,
+                                     max_length=args.max_length)
+        args.model = f"zero-shot {args.zero_shot}"
+    else:
+        jev = JEVPredictor(args.model, device=args.device, batch_size=args.batch_size, max_length=args.max_length)
     print(f"JevBench {REPO}@{REVISION[:8]} vs {TEACHER_RUN} | skipped: "
           + ", ".join(f"{k} ({v})" for k, v in SKIPPED.items()))
 

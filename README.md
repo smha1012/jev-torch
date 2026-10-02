@@ -442,6 +442,14 @@ python -m jev.bench --model your-name/jev-9b --out bench.json
 python -m jev.plot_bench bench.json                               # -> bench.png (add --theme dark)
 ```
 
+How much comes from training and how much from the backbone? Score the untrained base model (a fresh
+head that starts from its own answer-token preferences, no LoRA training) and draw it next to the result:
+
+```bash
+python -m jev.bench --zero_shot Qwen/Qwen3.5-9B --out bench-zeroshot.json
+python -m jev.plot_bench bench.json --baseline bench-zeroshot.json
+```
+
 It prints accuracy and ECE per slice for both systems, scored case by case with the same code (recomputing
 Jev's published per-slice accuracy from its raw predictions matches to within one tied case), and the
 model's accuracy as a share of Jev's. `banking77` (77 options, more than the head's 16 choice slots) and

@@ -2,6 +2,7 @@
 
     python3 -m jev.plot_bench bench.json                    # -> bench.png
     python3 -m jev.plot_bench bench.json --out bench.svg --theme dark
+    python3 -m jev.plot_bench bench.json --baseline bench-zeroshot.json   # + the untrained backbone
 
 Two panels on the same slices: accuracy (higher is better) and ECE (lower is better), each comparing
 this model with TypeSafe Jev 1.13.0. Needs seaborn (pip install seaborn).
@@ -16,14 +17,15 @@ from pathlib import Path
 # Reference data-viz palette: categorical slots 1-2, validated for colour-vision deficiency in both modes.
 THEMES = {
     "light": {"surface": "#fcfcfb", "text": "#0b0b0b", "muted": "#52514e", "grid": "#e4e3df",
-              "ours": "#2a78d6", "teacher": "#eb6834"},
+              "ours": "#2a78d6", "teacher": "#eb6834", "baseline": "#1baf7a"},
     "dark": {"surface": "#1a1a19", "text": "#ffffff", "muted": "#c3c2b7", "grid": "#3a3a37",
-             "ours": "#3987e5", "teacher": "#d95926"},
+             "ours": "#3987e5", "teacher": "#d95926", "baseline": "#199e70"},
 }
 KIND_ORDER = {"choice": 0, "noul": 1, "score": 2}
 
 
-def plot(data: dict, out: Path, theme: str = "light", model_name: str | None = None):
+def plot(data: dict, out: Path, theme: str = "light", model_name: str | None = None,
+         baseline: dict | None = None, baseline_name: str = "zero-shot"):
     import matplotlib
 
     matplotlib.use("Agg")
@@ -38,13 +40,16 @@ def plot(data: dict, out: Path, theme: str = "light", model_name: str | None = N
     order = [f"{s}  ·  {slices[s]['kind']}" for s in names]
     ours_label = model_name or Path(str(data.get("model", "this model"))).name or "this model"
     teacher_label = f"TypeSafe {data.get('teacher_run', 'Jev')}"
-    systems = [ours_label, teacher_label]
+    sources = [(ours_label, slices, "ours"), (teacher_label, slices, "teacher")]
+    if baseline:  # e.g. the untrained backbone from `jev.bench --zero_shot`, drawn first
+        sources.insert(0, (baseline_name, baseline["slices"], "ours"))
+    systems = [s for s, _, _ in sources]
 
     # Long-form table: one row per (slice, system).
     df = pd.DataFrame([
-        {"slice": label, "system": system, "acc": slices[name][who]["acc"], "ece": slices[name][who]["ece"]}
+        {"slice": label, "system": system, "acc": src[name][who]["acc"], "ece": src[name][who]["ece"]}
         for name, label in zip(names, order)
-        for system, who in zip(systems, ("ours", "teacher"))
+        for system, src, who in sources if name in src
     ])
 
     sns.set_theme(style="whitegrid", font="DejaVu Sans", font_scale=0.95, rc={
@@ -52,9 +57,11 @@ def plot(data: dict, out: Path, theme: str = "light", model_name: str | None = N
         "grid.color": c["grid"], "axes.edgecolor": c["grid"], "text.color": c["text"],
         "axes.labelcolor": c["muted"], "xtick.color": c["muted"], "ytick.color": c["text"],
     })
-    fig, axes = plt.subplots(1, 2, figsize=(12, 0.52 * len(names) + 2.4), sharey=True,
+    fig, axes = plt.subplots(1, 2, figsize=(12, (0.52 + 0.24 * bool(baseline)) * len(names) + 2.4), sharey=True,
                              gridspec_kw={"width_ratios": [1.6, 1]})
     palette = {ours_label: c["ours"], teacher_label: c["teacher"]}
+    if baseline:
+        palette[baseline_name] = c["baseline"]
     panels = [("acc", "Accuracy (higher is better)", axes[0], "{:.0%}"),
               ("ece", "Calibration error, ECE (lower is better)", axes[1], "{:.3f}")]
     for key, title, ax, fmt in panels:
@@ -81,11 +88,13 @@ def plot(data: dict, out: Path, theme: str = "light", model_name: str | None = N
     top_y = 1 - 0.18 / height_in
     fig.text(0.01, top_y, f"JevBench: {ours_label} vs {teacher_label}", ha="left", va="top", fontsize=13,
              color=c["text"], fontweight="bold")
-    fig.text(0.01, top_y - line, f"All {o['n']:,} cases: accuracy {o['acc']:.1%} vs {t['acc']:.1%} "
-             f"({o['acc'] / t['acc']:.1%} of Jev's) · ECE {o['ece']:.3f} vs {t['ece']:.3f}",
-             ha="left", va="top", fontsize=10, color=c["muted"])
+    summary = (f"All {o['n']:,} cases: accuracy {o['acc']:.1%} vs {t['acc']:.1%} "
+               f"({o['acc'] / t['acc']:.1%} of Jev's) · ECE {o['ece']:.3f} vs {t['ece']:.3f}")
+    if baseline:
+        summary += f" · {baseline_name}: {baseline['overall']['ours']['acc']:.1%}"
+    fig.text(0.01, top_y - line, summary, ha="left", va="top", fontsize=10, color=c["muted"])
     handles = [matplotlib.patches.Patch(color=palette[s], label=s) for s in systems]
-    fig.legend(handles=handles, loc="upper left", ncol=2, frameon=False, bbox_to_anchor=(0.003, top_y - 2 * line),
+    fig.legend(handles=handles, loc="upper left", ncol=len(handles), frameon=False, bbox_to_anchor=(0.003, top_y - 2 * line),
                labelcolor=c["text"], handlelength=1.2, handleheight=0.8)
     fig.tight_layout(rect=(0, 0, 1, top_y - 3.2 * line))
     fig.savefig(out, dpi=160)
@@ -98,11 +107,15 @@ def main():
     p.add_argument("--out", help="image path (.png or .svg); default: next to the JSON")
     p.add_argument("--theme", choices=sorted(THEMES), default="light")
     p.add_argument("--name", help="label for this model (default: from the JSON)")
+    p.add_argument("--baseline", metavar="JSON", help="a second jev.bench result to draw as a baseline, "
+                   "e.g. from --zero_shot, to show what training added")
+    p.add_argument("--baseline_name", default="zero-shot")
     args = p.parse_args()
 
     data = json.loads(Path(args.results).read_text())
     out = Path(args.out) if args.out else Path(args.results).with_suffix(".png")
-    plot(data, out, args.theme, args.name)
+    baseline = json.loads(Path(args.baseline).read_text()) if args.baseline else None
+    plot(data, out, args.theme, args.name, baseline, args.baseline_name)
     print(f"wrote {out}")
 
 

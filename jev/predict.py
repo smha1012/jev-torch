@@ -34,10 +34,30 @@ class JEVPredictor:
 
     def __init__(self, ckpt: str, device: str = "auto", max_length: int = 1024, batch_size: int = 16,
                  revision: str | None = None):
+        self._setup(device, max_length, batch_size,
+                    lambda dtype, device_map: JEVModel.load(ckpt, dtype=dtype, device_map=device_map, revision=revision))
+
+    @classmethod
+    def zero_shot(cls, base_model: str, device: str = "auto", max_length: int = 1024, batch_size: int = 16):
+        """The untrained starting point: `base_model` with a fresh JEV head and no training.
+
+        The head starts from the LM head's rows for the answer tokens and the new LoRA weights are zero,
+        so this scores each option by the base model's own next-token preference after "[decision]:",
+        with the same prompt as the trained model. Useful as a baseline: how much of a result comes
+        from the backbone, and how much from training.
+        """
+        from .config import ModelConfig
+
+        self = cls.__new__(cls)
+        self._setup(device, max_length, batch_size, lambda dtype, device_map: JEVModel.build(
+            ModelConfig(name=base_model, gradient_checkpointing=False), dtype=dtype, device_map=device_map))
+        return self
+
+    def _setup(self, device, max_length, batch_size, make_model):
         self.device = pick_device(device)
         dtype = pick_dtype(self.device)
         device_map = {"": self.device.index or 0} if self.device.type == "cuda" else None
-        self.model, self.tokenizer = JEVModel.load(ckpt, dtype=dtype, device_map=device_map, revision=revision)
+        self.model, self.tokenizer = make_model(dtype, device_map)
         self.model.to(self.device).eval()
         self.autocast = self.device.type == "cuda" and dtype == torch.bfloat16
         self.collator = JEVCollator(self.tokenizer, max_length=max_length)
