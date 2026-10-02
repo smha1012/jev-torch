@@ -121,36 +121,17 @@ def teacher_probs(pred: dict, keys: list) -> list[float] | None:
     return [float(dist.get(k, 0.0)) for k in keys]
 
 
-def main():
-    p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    who = p.add_mutually_exclusive_group(required=True)
-    who.add_argument("--model", help="checkpoint directory or Hub repo id")
-    who.add_argument("--zero_shot", metavar="BASE_MODEL",
-                     help="evaluate an untrained base model with a fresh JEV head (e.g. Qwen/Qwen3.5-9B), as a baseline")
-    p.add_argument("--slices", nargs="+", default=SLICES)
-    p.add_argument("--limit", type=int, help="cases per slice, for a quick look")
-    p.add_argument("--batch_size", type=int, default=16)
-    p.add_argument("--max_length", type=int, default=1024)
-    p.add_argument("--out", help="write per-slice results as JSON")
-    p.add_argument("--device", default="auto")
-    args = p.parse_args()
-
-    load_env()
+def run(jev: JEVPredictor, model_label: str, slices: list[str] = SLICES, limit: int | None = None) -> dict:
+    """Score one predictor on JevBench next to TypeSafe Jev; prints the table and returns the result dict."""
     teacher = {r["case_id"]: r for r in _read_jsonl(_download(f"predictions/{TEACHER_RUN}/predictions.jsonl"))}
-    if args.zero_shot:
-        jev = JEVPredictor.zero_shot(args.zero_shot, device=args.device, batch_size=args.batch_size,
-                                     max_length=args.max_length)
-        args.model = f"zero-shot {args.zero_shot}"
-    else:
-        jev = JEVPredictor(args.model, device=args.device, batch_size=args.batch_size, max_length=args.max_length)
-    print(f"JevBench {REPO}@{REVISION[:8]} vs {TEACHER_RUN} | skipped: "
+    print(f"JevBench {REPO}@{REVISION[:8]}: {model_label} vs {TEACHER_RUN} | skipped: "
           + ", ".join(f"{k} ({v})" for k, v in SKIPPED.items()))
 
     results, all_ours, all_teacher, all_labels = {}, [], [], []
-    for slice_name in args.slices:
+    for slice_name in slices:
         cases = _read_jsonl(_download(f"cases/{slice_name}.jsonl"))
-        if args.limit:
-            cases = cases[: args.limit]
+        if limit:
+            cases = cases[:limit]
         items = []
         for case in cases:
             converted = case_to_example(case)
@@ -192,11 +173,35 @@ def main():
     overall = {"ours": pooled(all_ours), "teacher": pooled(all_teacher)}
     macro = {who: sum(r[who]["acc"] for r in results.values()) / len(results) for who in ("ours", "teacher")}
     print("\n" + format_table(results, overall, macro))
+    return {"model": model_label, "data": f"{REPO}@{REVISION}", "teacher_run": TEACHER_RUN,
+            "skipped_slices": SKIPPED, "slices": results, "overall": overall, "macro_acc": macro}
+
+
+def main():
+    p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    who = p.add_mutually_exclusive_group(required=True)
+    who.add_argument("--model", help="checkpoint directory or Hub repo id")
+    who.add_argument("--zero_shot", metavar="BASE_MODEL",
+                     help="evaluate an untrained base model with a fresh JEV head (e.g. Qwen/Qwen3.5-9B), as a baseline")
+    p.add_argument("--slices", nargs="+", default=SLICES)
+    p.add_argument("--limit", type=int, help="cases per slice, for a quick look")
+    p.add_argument("--batch_size", type=int, default=16)
+    p.add_argument("--max_length", type=int, default=1024)
+    p.add_argument("--out", help="write per-slice results as JSON")
+    p.add_argument("--device", default="auto")
+    args = p.parse_args()
+
+    load_env()
+    if args.zero_shot:
+        jev = JEVPredictor.zero_shot(args.zero_shot, device=args.device, batch_size=args.batch_size,
+                                     max_length=args.max_length)
+        label = f"zero-shot {args.zero_shot}"
+    else:
+        jev = JEVPredictor(args.model, device=args.device, batch_size=args.batch_size, max_length=args.max_length)
+        label = args.model
+    result = run(jev, label, args.slices, args.limit)
     if args.out:
-        Path(args.out).write_text(json.dumps({"model": args.model, "data": f"{REPO}@{REVISION}",
-                                              "teacher_run": TEACHER_RUN, "skipped_slices": SKIPPED,
-                                              "slices": results, "overall": overall, "macro_acc": macro},
-                                             indent=2))
+        Path(args.out).write_text(json.dumps(result, indent=2))
         print(f"wrote {args.out}")
 
 

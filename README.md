@@ -437,18 +437,17 @@ next to TypeSafe Jev itself**, run [JevBench](https://huggingface.co/datasets/Le
 benchmark cases (MedQA, MedMCQA, PubMedQA, MMLU-Pro, ScienceQA, content-safety and agent-trace checks) with
 the predictions TypeSafe's hosted Jev 1.13.0 returned for the very same cases.
 
-```bash
-python -m jev.bench --model your-name/jev-9b --out bench.json
-python -m jev.plot_bench bench.json                               # -> bench.png (add --theme dark)
-```
-
-How much comes from training and how much from the backbone? Score the untrained base model (a fresh
-head that starts from its own answer-token preferences, no LoRA training) and draw it next to the result:
+One command runs the full report: the trained model, its **untrained backbone** as a baseline (a fresh head
+starting from the base model's own answer-token preferences, no training), charts and a summary table:
 
 ```bash
-python -m jev.bench --zero_shot Qwen/Qwen3.5-9B --out bench-zeroshot.json
-python -m jev.plot_bench bench.json --baseline bench-zeroshot.json
+python -m jev.bench_report --model your-name/jev-9b        # -> bench/jev-9b/
 ```
+
+`bench/jev-9b/` then holds `bench.json`, `bench-zeroshot.json`, `bench.png` / `bench-dark.png` (three bars per
+slice: zero-shot, trained, Jev) and `summary.md`, which splits each slice's result into **what training
+added** and **the remaining gap to Jev**. Finished steps are reused on re-runs (`--rerun` to recompute). The
+pieces also run on their own: `python -m jev.bench --model ...`, `--zero_shot BASE`, `python -m jev.plot_bench`.
 
 It prints accuracy and ECE per slice for both systems, scored case by case with the same code (recomputing
 Jev's published per-slice accuracy from its raw predictions matches to within one tied case), and the
@@ -584,7 +583,8 @@ jev/
 ├── train.py        # training entry point
 ├── evaluate.py     # compare a checkpoint with the teacher and the autotrust references
 ├── bench.py        # JevBench: ground-truth accuracy next to TypeSafe Jev 1.13.0
-├── plot_bench.py   # JevBench chart: accuracy and ECE per slice, both systems
+├── plot_bench.py   # JevBench chart: accuracy and ECE per slice
+├── bench_report.py # one command: trained + zero-shot JevBench, charts, summary
 ├── report.py       # teacher-row metrics and the comparison table
 ├── predict.py      # JEVPredictor + CLI
 ├── push_to_hub.py  # model card + manual upload
