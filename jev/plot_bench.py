@@ -90,8 +90,11 @@ def plot(data: dict, out: Path, theme: str = "light", model_name: str | None = N
              color=c["text"], fontweight="bold")
     summary = (f"All {o['n']:,} cases: accuracy {o['acc']:.1%} vs {t['acc']:.1%} "
                f"({o['acc'] / t['acc']:.1%} of Jev's) · ECE {o['ece']:.3f} vs {t['ece']:.3f}")
-    if baseline:
-        summary += f" · {baseline_name}: {baseline['overall']['ours']['acc']:.1%}"
+    if baseline:  # over the slices shown here, not the baseline file's own overall (it may cover more slices)
+        shown = [baseline["slices"][n]["ours"] for n in names if n in baseline["slices"]]
+        if shown:
+            acc = sum(r["acc"] * r.get("n", 1) for r in shown) / sum(r.get("n", 1) for r in shown)
+            summary += f" · {baseline_name}: {acc:.1%}"
     fig.text(0.01, top_y - line, summary, ha="left", va="top", fontsize=10, color=c["muted"])
     handles = [matplotlib.patches.Patch(color=palette[s], label=s) for s in systems]
     fig.legend(handles=handles, loc="upper left", ncol=len(handles), frameon=False, bbox_to_anchor=(0.003, top_y - 2 * line),
