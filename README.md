@@ -369,6 +369,7 @@ the predictions TypeSafe's hosted Jev 1.13.0 returned for the very same cases.
 
 ```bash
 python -m jev.bench --model your-name/jev-9b --out bench.json
+pip install matplotlib && python -m jev.plot_bench bench.json      # -> bench.png (add --theme dark)
 ```
 
 It prints accuracy and ECE per slice for both systems, scored case by case with the same code (recomputing
@@ -505,6 +506,7 @@ jev/
 ├── train.py        # training entry point
 ├── evaluate.py     # compare a checkpoint with the teacher and the autotrust references
 ├── bench.py        # JevBench: ground-truth accuracy next to TypeSafe Jev 1.13.0
+├── plot_bench.py   # JevBench chart: accuracy and ECE per slice, both systems
 ├── report.py       # teacher-row metrics and the comparison table
 ├── predict.py      # JEVPredictor + CLI
 ├── push_to_hub.py  # model card + manual upload
