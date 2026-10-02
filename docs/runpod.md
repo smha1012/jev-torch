@@ -27,6 +27,7 @@ It uses the two scripts in [`scripts/`](../scripts): `runpod_setup.sh` (once per
 7. [Watch the run](#7-watch-the-run)
 8. [Stop, resume, restart](#8-stop-resume-restart)
 9. [When training finishes](#9-when-training-finishes)
+    - [Same pod or a fresh pod?](#same-pod-or-a-fresh-pod)
 10. [Useful commands](#10-useful-commands)
 11. [Troubleshooting](#11-troubleshooting)
 12. [Cheat sheet](#12-cheat-sheet)
@@ -359,6 +360,56 @@ git add scripts/requirements.lock && git commit -m "Lock versions from a success
 **Publishing:** the Hub repo starts private. Make it public in the repo's *Settings* on huggingface.co when
 you are ready.
 
+### Same pod or a fresh pod?
+
+A run's results live in `runs/<name>/` on the volume the pod had when it trained. Whether you can use
+them depends on that volume, not on the code:
+
+| | You have `runs/<name>/` | You don't (a new pod without that volume) |
+|---|---|---|
+| When | the training pod, or a new pod with the **same network volume** on `/workspace` | a new pod with a new or no network volume |
+| Check | `ls runs/jev-9b/best` lists `adapter/ head.pt jev_config.json` | `ls runs/` fails or is empty |
+| Model argument | `runs/jev-9b/best` | the Hub repo, e.g. `your-name/jev-9b` |
+| Base model download | cached in `/workspace/hf_cache` | downloaded again (19 GB for 9B) |
+| First step | `cd /workspace/jev-torch` | clone, then `SKIP_SMOKE=1 bash scripts/runpod_setup.sh` (installs packages) |
+
+To keep results across pods, create the pod with the **same network volume** mounted on `/workspace`; the
+Hub copy (tag `final`) is the fallback when it is gone.
+
+**With `runs/`** (same pod or same volume):
+
+```bash
+cd /workspace/jev-torch
+python3 -m jev.evaluate --model runs/jev-9b/best
+python3 -m jev.bench --model runs/jev-9b/best --out runs/jev-9b/bench.json
+python3 examples/inference.py --model runs/jev-9b/best
+```
+
+**Without `runs/`** (fresh pod): use the Hub repo directly. A private repo needs the token in this shell
+first, which `source scripts/_env.sh` loads from the pod's variables or `.env.local`:
+
+```bash
+cd /workspace/jev-torch
+source scripts/_env.sh
+python3 -m jev.evaluate --model your-name/jev-9b
+python3 -m jev.bench --model your-name/jev-9b --out bench.json
+python3 examples/inference.py --model your-name/jev-9b
+```
+
+Refreshing the **model card** is the one task that needs a local run directory (it reads
+`runs/<name>/report.json` and `config.yaml`). On a fresh pod, rebuild one from the Hub copy first:
+
+```bash
+source scripts/_env.sh
+python3 -c "from huggingface_hub import snapshot_download; snapshot_download('your-name/jev-9b', revision='final', local_dir='runs/jev-9b/best', allow_patterns=['jev_config.json','head.pt','adapter/*'])"
+python3 -c "from jev.config import load_config; load_config('configs/jev-9b.yaml').save('runs/jev-9b/config.yaml')"
+python3 -m jev.evaluate --model runs/jev-9b/best --split test_set_30k ood --update_report runs/jev-9b/report.json
+python3 -m jev.push_to_hub --ckpt runs/jev-9b/best --repo your-name/jev-9b --card_only
+```
+
+(Add the same `--set` overrides to `load_config(...)` that the original run used, e.g. `['train.num_gpus=2']`,
+so the card describes it correctly.)
+
 ## 10. Useful commands
 
 | Task | Command |
@@ -397,6 +448,7 @@ The input format for `jev.predict` is described in the [README](../README.md#-da
 | `Triton >= 3.4.0 and < 3.7.1 on Hopper GPUs produces incorrect results ... install tilelang` | H100/H200 with the image's Triton 3.4: fla needs its TileLang backend, which needs nvcc | `git pull` and rerun `bash scripts/runpod_setup.sh` (it installs tilelang and nvcc and checks the backend) |
 | very low `tok/s` | slow kernels, or a GPU smaller than planned | check the smoke-test warnings; compare with section 2 |
 | the run restarts from step 0 unexpectedly | `output_dir` changed, so `last/` was not found | use the same `train.output_dir` (and `--set` flags) as the original run |
+| `'runs/jev-9b/best' is neither a checkpoint directory nor a Hub repo id` | a new pod without the volume that holds `runs/` | use the Hub repo (`--model your-name/jev-9b`) or attach the same network volume ([Same pod or a fresh pod?](#same-pod-or-a-fresh-pod)) |
 | `ModuleNotFoundError: No module named 'jev'` (or `fla`) after a restart | the container disk was wiped | `SKIP_SMOKE=1 bash scripts/runpod_setup.sh` (section 8) |
 
 Full logs: training in `runs/<name>/train.log`, smoke test in `/tmp/jev-smoke.log`.

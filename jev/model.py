@@ -155,7 +155,10 @@ def resolve_checkpoint(path_or_repo: str | Path, revision: str | None = None) ->
             raise FileNotFoundError(f"{path} is not a jev-torch checkpoint (no jev_config.json)")
         return path
     if path.exists() or str(path_or_repo).count("/") != 1:
-        raise FileNotFoundError(f"{path_or_repo!r} is neither a checkpoint directory nor a Hub repo id")
+        raise FileNotFoundError(
+            f"{path_or_repo!r} is neither a checkpoint directory nor a Hub repo id. On a fresh pod the run "
+            "directory does not exist; pass the Hub repo instead (e.g. --model your-name/jev-9b) or "
+            "attach the network volume that holds runs/ (docs/runpod.md, 'Same pod or a fresh pod?').")
     from huggingface_hub import snapshot_download
 
     return Path(snapshot_download(str(path_or_repo), revision=revision, allow_patterns=CHECKPOINT_FILES))
