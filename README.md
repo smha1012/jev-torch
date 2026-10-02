@@ -14,7 +14,7 @@
 [![W&B](https://img.shields.io/badge/W%26B-ready-FFBE00?style=flat-square&logo=weightsandbiases&logoColor=black)](https://wandb.ai/)
 [![License](https://img.shields.io/badge/license-Apache--2.0-3B82F6?style=flat-square)](LICENSE)
 
-**[Quick start](#-quick-start)** · **[How it works](#-how-it-works)** · **[Data format](#-data-format)** ·
+**[Results](#-results)** · **[Quick start](#-quick-start)** · **[How it works](#-how-it-works)** · **[Data format](#-data-format)** ·
 **[Hardware](#-configs--hardware)** · **[RunPod guide](docs/runpod.md)** · **[Inference](#-inference)** ·
 **[Roadmap](#-roadmap)**
 
@@ -23,10 +23,10 @@
 <br>
 
 > [!NOTE]
-> **Status: early.** The full pipeline (training → calibration → evaluation → inference) is implemented and
-> tested end to end on CPU. Multi-GPU and 4-bit training on CUDA are not validated yet, and no trained
-> weights are published. Numbers marked *measured* come from the [autotrust/JEV](https://huggingface.co/autotrust/JEV-9B)
-> model cards, whose recipe this project reproduces.
+> **Status.** JEV-9B has been trained end to end with this repo on 2× H100 SXM and matches the published
+> autotrust/JEV-9B on agreement with TypeSafe Jev ([results](#-results)). JEV-27B and 4-bit (QLoRA) training
+> are not run yet. Numbers marked *measured* in the hardware table come from the
+> [autotrust/JEV](https://huggingface.co/autotrust/JEV-9B) model cards unless noted.
 
 ## 💡 Why decision models?
 
@@ -132,6 +132,75 @@ for this question's kind enter the softmax. A temperature per kind, fit after tr
 </tr>
 </table>
 
+## 📊 Results
+
+**JEV-9B** (`configs/jev-9b.yaml`): Qwen3.5-9B + LoRA r16 + 24-slot head, 4,750 steps × 128 rows (~0.93 epoch),
+trained with this repo on **2× H100 SXM** in about 3.5 hours (~7k tokens/s).
+
+### Agreement with the teacher
+
+On the 25,376 rows of `test_set_30k` labelled by TypeSafe Jev 1.13, the same rows the autotrust cards
+report on (`python -m jev.evaluate`):
+
+| Metric | **jev-torch JEV-9B** | autotrust JEV-9B | autotrust JEV-27B |
+|---|---:|---:|---:|
+| Mean KL to teacher (lower is better) | **0.0184** | 0.0190 | 0.0170 |
+| Choice top-1 agreement, teacher-labelled rows | **90.1%** | 90.2% | – |
+| Choice top-1 agreement, all choice rows | **89.9%** | 89.8% | 90.3% |
+| ECE vs teacher probabilities | **0.0009** | 0.0007 | 0.0009 |
+
+The reproduction lands on the published JEV-9B numbers. Per kind: choice 90.1%, noul 95.8%, score 87.9%
+top-1 agreement.
+
+### JevBench: ground truth, next to TypeSafe Jev
+
+On 6,516 public benchmark cases with gold answers, against the predictions TypeSafe's hosted Jev 1.13.0
+returned for the same cases (`python -m jev.bench`):
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/jevbench-jev-9b-dark.png">
+  <img alt="JevBench accuracy and ECE per slice, jev-9b vs TypeSafe Jev 1.13.0" src="docs/assets/jevbench-jev-9b-light.png" width="100%">
+</picture>
+
+| | jev-torch JEV-9B | TypeSafe Jev 1.13.0 |
+|---|---:|---:|
+| Accuracy, all 6,516 cases | **74.1%** | 84.9% |
+| Share of Jev's accuracy | **87.3%** | 100% |
+| ECE | **0.029** | 0.020 |
+
+- **Close to Jev** on safety and science checks: jailbreak 94% vs 98%, ScienceQA 93% vs 96%, Aegis 2.0 80% vs 83%.
+- **Largest gaps** where knowledge or long inputs dominate: MMLU-Pro −24 points, agent traces (`atbench500`)
+  −16, MedQA −15. The agent traces are often longer than the 1,024-token context used here.
+- **Calibration** stays close to Jev's, and better on MedMCQA, PubMedQA and agent traces.
+
+<details>
+<summary><b>Per-slice numbers</b></summary>
+<br>
+
+| Slice | Kind | n | Accuracy (ours / Jev) | ECE (ours / Jev) |
+|---|---|---:|---:|---:|
+| medqa_usmle | choice | 1,000 | 72.0% / 87.3% | 0.025 / 0.024 |
+| medmcqa | choice | 1,000 | 67.7% / 78.1% | 0.024 / 0.044 |
+| pubmedqa | choice | 500 | 63.4% / 70.6% | 0.154 / 0.190 |
+| mmlu_pro | choice | 1,000 | 56.3% / 80.6% | 0.050 / 0.058 |
+| scienceqa_text | choice | 1,000 | 93.0% / 95.6% | 0.022 / 0.011 |
+| aegis2 | noul | 500 | 80.0% / 82.8% | 0.060 / 0.029 |
+| aegis2_response | noul | 500 | 78.0% / 81.2% | 0.039 / 0.025 |
+| jailbreak_classification | noul | 400 | 94.0% / 97.5% | 0.029 / 0.030 |
+| prompt_injections | noul | 116 | 59.5% / 73.3% | 0.317 / 0.162 |
+| atbench500 | noul | 500 | 76.8% / 93.0% | 0.056 / 0.139 |
+
+Raw results: [`docs/results/jevbench-jev-9b.json`](docs/results/jevbench-jev-9b.json). `banking77` (77 options)
+and `sst5` (text withheld) are not scored.
+
+</details>
+
+### Next: JEV-27B
+
+> [!NOTE]
+> **TODO.** Train `configs/jev-27b.yaml` (Qwen3.5-27B) and add its teacher-agreement and JevBench results
+> here. autotrust reports lower KL (0.017) and a much smaller out-of-domain gap for 27B than for 9B.
+
 ## 🚀 Quick start
 
 ```bash
@@ -224,7 +293,7 @@ rows; gradient accumulation is derived automatically.
 |---|---|---|---|
 | `debug.yaml` | Qwen3.5-0.8B | laptop | minutes (256 rows) |
 | `jev-2b.yaml` | 1.9B · 15.6M | ~10 GB <sub>est.</sub> | ~1.5 h on H100 <sub>est.</sub> |
-| `jev-9b.yaml` | 7.9B · 40.1M | ~25 GB <sub>est.</sub> | **~3 h on 1× B200** <sub>measured</sub> · ~6 h on H100 <sub>est.</sub> |
+| `jev-9b.yaml` | 7.9B · 40.1M | ~25 GB <sub>est.</sub> | **~3.5 h on 2× H100 SXM** <sub>measured, this repo</sub> · ~3 h on 1× B200 <sub>autotrust</sub> |
 | `jev-27b.yaml` | 25.6B · 108.8M | ~60 GB <sub>est.</sub> · 79 GB peak <sub>measured</sub> | **~9.2 h on 1× B200** <sub>measured</sub> · ~3 h on 8× H100 <sub>est.</sub> |
 | `jev-27b-qlora.yaml` | 25.6B 4-bit · 108.8M | ~30 GB <sub>est.</sub> | slower than bf16 |
 
@@ -525,8 +594,9 @@ docs/assets/        # README artwork (python docs/assets/build.py)
 - [x] JEV recipe: 24-slot head, KL + RPS, per-kind calibration
 - [x] Qwen3.5 0.8B → 27B configs, data parallel, QLoRA
 - [x] Resumable training, W&B, RunPod scripts, Hub uploads with model cards
-- [ ] Validate multi-GPU training on CUDA end to end
-- [ ] Publish trained checkpoints, `test_set_30k` and JevBench results
+- [x] Validate multi-GPU training on CUDA end to end (2× H100 SXM)
+- [x] JEV-9B: train, match autotrust/JEV-9B on teacher agreement, JevBench results
+- [ ] **JEV-27B: train `configs/jev-27b.yaml` and report its results** (TODO)
 - [ ] Kind-stratified batches and token-budget micro-batches (as in JEV-9B)
 - [ ] FSDP for backbones that do not fit on one GPU
 

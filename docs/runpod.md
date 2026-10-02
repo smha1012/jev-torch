@@ -5,7 +5,7 @@ It uses the two scripts in [`scripts/`](../scripts): `runpod_setup.sh` (once per
 (each run).
 
 > [!IMPORTANT]
-> **Tested environment.** This guide has only been tested on the setup below. Other GPUs, GPU counts or
+> **Tested environment.** This guide has only been tested on the setup below (JEV-9B). Other GPUs, GPU counts or
 > images should work, but behave differently in the ways listed in [Other GPUs](#other-gpus) and have not been
 > verified.
 >
@@ -14,7 +14,7 @@ It uses the two scripts in [`scripts/`](../scripts): `runpod_setup.sh` (once per
 > | RunPod image | `runpod/pytorch:1.0.2-cu1281-torch280-ubuntu2404` |
 > | GPUs | 2× NVIDIA H100 SXM (80 GB) |
 > | Software | Ubuntu 24.04 · Python 3.12 · torch 2.8.0+cu128 · Triton 3.4.0 · transformers 5.17.0 · flash-linear-attention 0.5.2 |
-> | Status (2026-10-01) | setup and the GPU smoke test are being validated; no full training run has finished yet |
+> | Status (2026-10-02) | JEV-9B trained end to end (4,750 steps, about 3.5 h) and evaluated; see the README results. JEV-27B not run yet |
 
 **Contents**
 
