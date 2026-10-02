@@ -170,20 +170,36 @@ def apply_temperatures(logits, kind, temps):
 
 
 @torch.no_grad()
-def compute_metrics(logits, target, label, option_mask, n_bins: int = 15, **_):
-    """acc: top-1 agrees with label (= teacher's argmax); kl: to the teacher distribution;
-    ece: confidence vs. accuracy gap; tv: total-variation distance to the teacher distribution."""
-    logits, target = logits.float(), target.float()
-    p = torch.softmax(logits, dim=-1).masked_fill(~option_mask, 0.0)
-    conf, pred = p.max(-1)
-    correct = (pred == label).float()
-
-    ece = torch.zeros(())
+def _binned_gap(conf, reference, n_bins):
+    """Expected |mean(reference) - mean(conf)| over equal-width confidence bins."""
+    gap = torch.zeros(())
     edges = torch.linspace(0, 1, n_bins + 1)
     for lo, hi in zip(edges[:-1], edges[1:]):
         m = (conf > lo) & (conf <= hi)
         if m.any():
-            ece += m.float().mean() * (correct[m].mean() - conf[m].mean()).abs()
+            gap += m.float().mean() * (reference[m].mean() - conf[m].mean()).abs()
+    return gap
+
+
+def compute_metrics(logits, target, label, option_mask, n_bins: int = 15, **_):
+    """acc: top-1 agrees with label (= teacher's argmax); kl / tv: distance to the target distribution.
+
+    ece: calibration against the target distribution. Within each confidence bin, the model's confidence
+      in its top option is compared with the target probability of that same option. With one-hot
+      targets this is the usual ECE (target probability = 1 if correct, else 0); with soft teacher
+      targets, a student that reproduces the teacher exactly scores 0.
+    ece_top1: confidence vs. top-1 agreement with the label. With soft targets this is NOT a calibration
+      error: when the teacher itself says [0.6, 0.4], a perfect student is 60% confident and 100% in
+      agreement, a gap of 0.4. Kept for reference.
+    """
+    logits, target = logits.float(), target.float()
+    p = torch.softmax(logits, dim=-1).masked_fill(~option_mask, 0.0)
+    conf, pred = p.max(-1)
+    correct = (pred == label).float()
+    target_conf = target.gather(1, pred.unsqueeze(1)).squeeze(1)  # target probability of the chosen option
+
+    ece = _binned_gap(conf, target_conf, n_bins)
+    ece_top1 = _binned_gap(conf, correct, n_bins)
 
     return {
         "acc": correct.mean().item(),
@@ -191,6 +207,7 @@ def compute_metrics(logits, target, label, option_mask, n_bins: int = 15, **_):
         "brier": ((p - target) ** 2).sum(-1).mean().item(),
         "tv": 0.5 * (p - target).abs().sum(-1).mean().item(),
         "ece": ece.item(),
+        "ece_top1": ece_top1.item(),
         "conf": conf.mean().item(),
         "n": int(len(label)),
     }

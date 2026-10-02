@@ -51,7 +51,7 @@ def format_comparison(block: dict, split: str) -> str:
     cols = [("mean KL to teacher (lower is better)", "kl", "{:.4f}"),
             ("choice top-1 agreement, teacher rows", "choice_acc", "{:.1%}"),
             ("choice top-1 agreement, all choice rows", "choice_acc_all_rows", "{:.1%}"),
-            ("ECE", "ece", "{:.4f}")]
+            ("ECE vs teacher probabilities", "ece", "{:.4f}")]
     fmt = lambda v, f: f.format(v) if v is not None else "-"
     lines = [f"vs teacher on {split} ({block['n']:,} teacher-labelled rows):",
              f"  {'metric':42s} {'this model':>11s} " + " ".join(f"{name:>9s}" for name in AUTOTRUST_REFERENCE)]

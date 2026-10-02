@@ -447,3 +447,17 @@ def test_teacher_block_uses_teacher_rows_only():
     assert set(block["by_kind"]) == {"choice", "noul"}
     assert "JEV-9B" in format_comparison(block, "test_set_30k")
     assert teacher_block(res, exs, []) is None
+
+
+def test_ece_is_zero_for_a_perfect_student_and_standard_for_hard_labels():
+    from jev.losses import compute_metrics
+
+    torch.manual_seed(0)
+    target = torch.softmax(torch.randn(2000, 4) * 1.5, -1)  # an uncertain teacher
+    mask = torch.ones_like(target, dtype=torch.bool)
+    perfect = compute_metrics(target.log(), target, target.argmax(1), mask)
+    assert perfect["ece"] < 0.01          # reproducing the teacher = calibrated
+    assert perfect["ece_top1"] > 0.2      # the agreement gap is large even so
+    hard = F.one_hot(target.argmax(1), 4).float()
+    m = compute_metrics(torch.randn(2000, 4), hard, target.argmax(1), mask)
+    assert abs(m["ece"] - m["ece_top1"]) < 1e-6   # one-hot targets: identical to the usual ECE

@@ -354,7 +354,8 @@ runs/jev-9b/
 | `acc` | top-1 agrees with the teacher's top option |
 | `kl` | KL divergence to the teacher distribution (lower is better) |
 | `tv` | total-variation distance to the teacher distribution |
-| `ece` | calibration error: does 0.8 confidence mean 80% correct? |
+| `ece` | calibration error against the target probabilities (the usual ECE when targets are one-hot) |
+| `ece_top1` | confidence vs. top-1 agreement; not a calibration score with soft teacher targets |
 | `brier` | squared error of the probability vector |
 
 </details>
