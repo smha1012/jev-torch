@@ -61,3 +61,22 @@ def format_comparison(block: dict, split: str) -> str:
     lines.append("  per kind: " + "  ".join(f"{k} acc={m['acc']:.1%} kl={m['kl']:.4f}"
                                             for k, m in block["by_kind"].items()))
     return "\n".join(lines)
+
+
+def comparison_markdown(block: dict) -> str:
+    """The comparison as a Markdown table, for model cards."""
+    choice = block["by_kind"].get("choice", {})
+    ours = {"kl": block["kl"], "choice_acc": choice.get("acc"),
+            "choice_acc_all_rows": block.get("choice_acc_all_rows"), "ece": block["ece"]}
+    rows = [("Mean KL to teacher (lower is better)", "kl", "{:.4f}"),
+            ("Choice top-1 agreement, teacher-labelled rows", "choice_acc", "{:.1%}"),
+            ("Choice top-1 agreement, all choice rows", "choice_acc_all_rows", "{:.1%}"),
+            ("ECE vs teacher probabilities", "ece", "{:.4f}")]
+    fmt = lambda v, f: f.format(v) if v is not None else "–"
+    names = list(AUTOTRUST_REFERENCE)
+    lines = ["| Metric | **This model** | " + " | ".join(f"autotrust {n}" for n in names) + " |",
+             "|---|---:|" + "---:|" * len(names)]
+    for label, key, f in rows:
+        refs = " | ".join(fmt(AUTOTRUST_REFERENCE[n].get(key), f) for n in names)
+        lines.append(f"| {label} | **{fmt(ours[key], f)}** | {refs} |")
+    return "\n".join(lines)

@@ -21,6 +21,7 @@ import yaml
 from .env import load_env
 from .hub import HubUploader, stage_checkpoint
 from .losses import JEVLoss
+from .report import comparison_markdown
 
 
 def _metrics_table(report: dict) -> str:
@@ -33,7 +34,7 @@ def _metrics_table(report: dict) -> str:
         rows += [(f"{split} / {k}", m) for k, m in cal.get("by_kind", {}).items()]
     if not rows:
         return ""
-    lines = ["| split | n | top-1 agreement | KL to teacher | ECE |", "|---|---:|---:|---:|---:|"]
+    lines = ["| split | n | top-1 agreement | KL to target | ECE |", "|---|---:|---:|---:|---:|"]
     lines += [f"| {name} | {m['n']:,} | {m['acc']:.3f} | {m['kl']:.4f} | {m['ece']:.4f} |" for name, m in rows]
     return "\n".join(lines)
 
@@ -64,6 +65,17 @@ def build_model_card(ckpt: Path, repo_id: str, status: str | None = None) -> str
         front["datasets"] = [hub_dataset(data_cfg)]
 
     metrics = _metrics_table(report)
+    vs = report.get("test_set_30k", {}).get("vs_teacher")
+    teacher_section = ""
+    if vs:
+        teacher_section = f"""
+### Compared with the teacher
+
+On the {vs['n']:,} rows of `test_set_30k` labelled by the teacher (TypeSafe Jev 1.13), the same rows the
+autotrust/JEV cards report on:
+
+{comparison_markdown(vs)}
+"""
     from .sources import describe_source
 
     settings = [
@@ -114,8 +126,10 @@ Question kinds: `noul` (exactly 2 options, false-like then true-like), `choice` 
 ## Evaluation
 
 {metrics or "_No evaluation report was found next to this checkpoint._"}
-
-`top-1 agreement` = how often the model's top option matches the teacher's top option.
+{teacher_section}
+`top-1 agreement` = how often the model's top option matches the target's top option. `KL to target` =
+distance to the target distribution (the teacher's on Jev-labelled rows). `ECE` = calibration against the
+target probabilities (the usual ECE where targets are one-hot).
 
 ## Limitations
 
@@ -138,6 +152,8 @@ def main():
     p.add_argument("--public", action="store_true", help="create the repo public (default: private)")
     p.add_argument("--tag", help="also tag this upload, e.g. v1")
     p.add_argument("--dry_run", metavar="DIR", help="write the staged upload to DIR instead of uploading")
+    p.add_argument("--card_only", action="store_true",
+                   help="regenerate and upload only README.md (e.g. after jev.evaluate --update_report)")
     args = p.parse_args()
 
     ckpt = Path(args.ckpt)
@@ -151,7 +167,8 @@ def main():
 
     load_env()
     hub = HubUploader.setup(args.repo, private=not args.public, run_name=ckpt.parent.name)
-    if not hub.push(ckpt, card, "Upload jev-torch checkpoint", tag=args.tag):
+    ok = hub.push_card(card) if args.card_only else hub.push(ckpt, card, "Upload jev-torch checkpoint", tag=args.tag)
+    if not ok:
         raise SystemExit(1)
 
 

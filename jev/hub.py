@@ -96,6 +96,17 @@ class HubUploader:
               f"({'private' if private else 'public'})")
         return cls(repo, private)
 
+    def push_card(self, card: str, message: str = "Update model card") -> bool:
+        """Replace only README.md; weights and tags stay as they are."""
+        try:
+            self.api.upload_file(path_or_fileobj=card.encode(), path_in_repo="README.md",
+                                 repo_id=self.repo, commit_message=message)
+            print(f"Hub: updated the model card -> https://huggingface.co/{self.repo}", flush=True)
+            return True
+        except Exception as e:
+            print(f"Hub: ⚠️ card update failed ({type(e).__name__}: {e})", flush=True)
+            return False
+
     def push(self, ckpt: Path, card: str, message: str, tag: str | None = None) -> bool:
         """Upload one checkpoint. Never raises: a failed push must not kill a long training run."""
         try:
