@@ -1,8 +1,8 @@
-# Qwen3.5-27B with the frozen backbone in 4-bit NF4 (QLoRA).
+# Qwen3.8-27B (as autotrust/JEV-27B) with the frozen backbone in 4-bit NF4 (QLoRA).
 # Memory (estimate): ~16 GB weights + activations ~ 25-30 GB -> one 48 GB GPU (L40S / A6000).
 # Slower per token than bf16 (dequantization) and slightly lower quality. Not measured by autotrust.
 model:
-  name: Qwen/Qwen3.5-27B
+  name: Qwen/Qwen3.8-27B
   gradient_checkpointing: true
   load_in_4bit: true
 data:

@@ -74,7 +74,7 @@ for this question's kind enter the softmax. A temperature per kind, fit after tr
 <td width="33%" valign="top">
 
 **🧠 Any causal LM**<br>
-<sub>Ready configs for Qwen3.5 0.8B → 27B, including its hybrid linear-attention layers.</sub>
+<sub>Ready configs for Qwen3.5 0.8B–9B and Qwen3.8-27B (same hybrid linear-attention architecture).</sub>
 
 </td>
 <td width="33%" valign="top">
@@ -198,7 +198,7 @@ and `sst5` (text withheld) are not scored.
 ### Next: JEV-27B
 
 > [!NOTE]
-> **TODO.** Train `configs/jev-27b.yaml` (Qwen3.5-27B) and add its teacher-agreement and JevBench results
+> **TODO.** Train `configs/jev-27b.yaml` (Qwen3.8-27B, the backbone autotrust/JEV-27B uses) and add its teacher-agreement and JevBench results
 > here. autotrust reports lower KL (0.017) and a much smaller out-of-domain gap for 27B than for 9B.
 
 ## 🚀 Quick start

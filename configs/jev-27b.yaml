@@ -1,11 +1,12 @@
-# Qwen3.5-27B (25.6B backbone, 108.8M LoRA; matches autotrust/JEV-27B exactly), bf16.
+# Qwen3.8-27B (25.6B backbone, 108.8M LoRA), bf16: the backbone autotrust/JEV-27B and Open-Jev-27B use.
+# Same qwen3_5 architecture and size as Qwen3.5-27B (newer weights, Aug 2026), so the code is unchanged.
 #
 # Measured by autotrust: 1x B200, 5,000 steps, ~9.2 h, ~2.4k tok/s, peak 79 GB
 # (their micro-batches held up to 24k padded tokens).
 # Memory (our estimate): weights 48 GB + activations. micro_batch_size 8 (<= 8k tokens) ~60 GB,
 # so one 80 GB GPU (H100/A100) fits. More GPUs only make it faster (data parallel, full copy per GPU).
 model:
-  name: Qwen/Qwen3.5-27B
+  name: Qwen/Qwen3.8-27B
   gradient_checkpointing: true
 data:
   # JEV distillation corpus v3: 741k rows of TypeSafe Jev 1.13 output distributions (65 domains).
