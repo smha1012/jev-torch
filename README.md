@@ -14,7 +14,7 @@
 [![W&B](https://img.shields.io/badge/W%26B-ready-FFBE00?style=flat-square&logo=weightsandbiases&logoColor=black)](https://wandb.ai/)
 [![License](https://img.shields.io/badge/license-Apache--2.0-3B82F6?style=flat-square)](LICENSE)
 
-**[Results](#-results)** · **[Quick start](#-quick-start)** · **[How it works](#-how-it-works)** · **[Data format](#-data-format)** ·
+**[Results](#-results)** · **[Metrics](#-metrics-explained)** · **[Quick start](#-quick-start)** · **[How it works](#-how-it-works)** · **[Data format](#-data-format)** ·
 **[Hardware](#-configs--hardware)** · **[RunPod guide](docs/runpod.md)** · **[Inference](#-inference)** ·
 **[Roadmap](#-roadmap)**
 
@@ -154,8 +154,8 @@ top-1 agreement.
 
 ### JevBench: ground truth, next to TypeSafe Jev
 
-On 6,516 public benchmark cases with gold answers, against the predictions TypeSafe's hosted Jev 1.13.0
-returned for the same cases (`python -m jev.bench`):
+On the 6,516 text cases of **Leanmcp JevBench v0.1** (a community benchmark, [what it measures](#-jevbench-accuracy-against-typesafe-jev)),
+against the predictions TypeSafe's hosted Jev 1.13.0 returned for the same cases (`python -m jev.bench`):
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/assets/jevbench-jev-9b-dark.png">
@@ -200,6 +200,95 @@ and `sst5` (text withheld) are not scored.
 > [!NOTE]
 > **TODO.** Train `configs/jev-27b.yaml` (Qwen3.8-27B, the backbone autotrust/JEV-27B uses) and add its teacher-agreement and JevBench results
 > here. autotrust reports lower KL (0.017) and a much smaller out-of-domain gap for 27B than for 9B.
+
+## 📏 Metrics explained
+
+The two evaluations answer different questions, so they use the same metrics against different references:
+
+| | Teacher agreement (`jev.evaluate`, `report.json`) | JevBench (`jev.bench`) |
+|---|---|---|
+| Question | how closely does the model copy TypeSafe Jev? | how often is it right, next to Jev? |
+| Reference `t` | the teacher's probability distribution (soft) | the gold answer (one-hot) |
+| Good result | numbers close to autotrust/JEV | numbers close to Jev's own |
+
+**Notation.** For one question with options `1…K`: `p` is the model's (calibrated) probability per option,
+`t` the reference distribution, `ŷ = argmax p` the option the model picks, and `conf = max p` its confidence.
+
+### Accuracy / top-1 agreement (`acc`), higher is better
+
+The share of questions where the model's top option is the reference's top option. Against the teacher
+this is **agreement** ("would Jev have picked the same?"); on JevBench it is plain **accuracy**. For a yes/no
+(`noul`) question the model says *true* when `P(true) ≥ 0.5`.
+
+It ignores how confident the model was: 51% and 99% on the right option count the same.
+
+### KL divergence to the teacher (`kl`), lower is better, 0 = identical
+
+`KL(t ‖ p) = Σ t_k · log(t_k / p_k)`, averaged over questions, in nats. It compares **whole distributions**,
+so it also checks that the model is as unsure as the teacher where the teacher is unsure. It is the main
+training loss and the headline number for distillation.
+
+> Teacher `[0.6, 0.4]`, model `[0.5, 0.5]`: same top option (agreement 100%), but KL = 0.020. A KL of
+> 0.018 over 25k questions means the model's distributions are, on average, about that close to Jev's.
+
+### Total-variation distance (`tv`), lower is better, 0 to 1
+
+`½ Σ |p_k − t_k|`: the probability mass that would have to move to turn the model's answer into the
+teacher's. Easier to read than KL. In the example above it is 0.10.
+
+### Brier score (`brier`), lower is better
+
+`Σ_k (p_k − t_k)²`, averaged. With a one-hot gold answer it ranges from 0 (certain and right) to 2 (certain and
+wrong) and rewards both being right and being appropriately confident.
+
+> Gold = option 1. Model `[0.8, 0.2]` → 0.08. Model `[0.2, 0.8]` → 1.28. Model `[0.5, 0.5]` → 0.50.
+
+That is why a model can have a **better ECE but a worse Brier** than another: Brier also pays for being wrong
+more often.
+
+### Expected calibration error (`ece`), lower is better, 0 = perfectly calibrated
+
+Calibration asks: **when the model says 80%, is it right about 80% of the time?** ECE sorts predictions into
+confidence bins (`0–0.1, 0.1–0.2, …`; 10 bins on JevBench, 15 in `report.json`), compares in each bin the
+average confidence with how often the chosen option was actually right, and averages those gaps weighted by
+how many predictions fall in each bin.
+
+> 1,000 answers given with ~90% confidence, 900 of them right → gap 0, perfect. Only 750 right → gap 0.15:
+> the model is overconfident. An ECE of 0.03 means its stated confidence is off by about 3 points on average.
+
+This calibration is what makes the "act when p ≥ 0.85, otherwise escalate" pattern safe.
+
+- **On JevBench**, "right" means the chosen option is the gold answer: the standard ECE.
+- **In `report.json` (`ece`)**, the reference is soft, so "how often right" becomes **the teacher's probability
+  for the option the model chose**. This reduces to the standard ECE for one-hot targets and is 0 for a model
+  that reproduces the teacher exactly.
+- **`ece_top1`** compares confidence with plain top-1 agreement. With an uncertain teacher this is *not*
+  calibration: if Jev says `[0.6, 0.4]`, a perfect copy is 60% confident and 100% in agreement, a "gap" of
+  0.4. It is reported for reference only.
+
+ECE alone can look good for a useless model (always answer with the base rate), so read it next to accuracy
+or Brier.
+
+### Confidence (`conf`) and temperature
+
+`conf` is the average `max p`: how sure the model sounds. After training, one **temperature** per question
+kind is fitted on the calibration split (`softmax(logits / T)`). `T > 1` softens overconfident outputs,
+`T < 1` sharpens timid ones, and `T ≈ 1` (as here: 1.008 / 1.000 / 1.008) means training already left the
+model calibrated.
+
+### JevBench summary numbers
+
+| Number | Meaning |
+|---|---|
+| **all cases** | metrics pooled over every case, so larger slices weigh more |
+| **mean over slices** | each slice counts equally, whatever its size |
+| **share of Jev's accuracy** | model accuracy ÷ Jev accuracy on the same cases (87.3% = 74.1 / 84.9) |
+| **training gain** (`summary.md`) | trained − zero-shot accuracy: what fine-tuning added on top of the backbone |
+| **gap to Jev** (`summary.md`) | trained − Jev accuracy: what is still missing |
+
+**Noise.** These are samples. With 1,000 cases an accuracy is uncertain by about ±3 points (95%), with 500
+about ±4, and with `prompt_injections`' 116 about ±9, so differences of a few points on a single slice can be
+chance.
 
 ## 🚀 Quick start
 
@@ -403,7 +492,7 @@ Access is checked **before** data and weights load, existing repos trigger an ov
 upload never stops training. With `max_steps` under one epoch (the 9B/27B defaults) only `final` is pushed.
 
 <details>
-<summary><b>📊 Weights & Biases · 📁 Outputs · 📏 Metrics</b></summary>
+<summary><b>📊 Weights & Biases · 📁 Outputs</b></summary>
 <br>
 
 **W&B** is on by default (`train.wandb_project`). It logs loss, grad norm, lr, tokens/s, validation metrics and
@@ -419,23 +508,63 @@ runs/jev-9b/
 └── report.json     # test_set_30k / ood metrics, uncalibrated vs calibrated, by kind and family
 ```
 
-| Metric | Meaning |
-|---|---|
-| `acc` | top-1 agrees with the teacher's top option |
-| `kl` | KL divergence to the teacher distribution (lower is better) |
-| `tv` | total-variation distance to the teacher distribution |
-| `ece` | calibration error against the target probabilities (the usual ECE when targets are one-hot) |
-| `ece_top1` | confidence vs. top-1 agreement; not a calibration score with soft teacher targets |
-| `brier` | squared error of the probability vector |
+What each metric means, with examples: [Metrics explained](#-metrics-explained).
 
 </details>
 
 ## 🏁 JevBench: accuracy against TypeSafe Jev
 
-`report.json` measures how closely a model copies its teacher. To see how it does on **ground-truth labels
-next to TypeSafe Jev itself**, run [JevBench](https://huggingface.co/datasets/Leanmcp/jevbench): public
-benchmark cases (MedQA, MedMCQA, PubMedQA, MMLU-Pro, ScienceQA, content-safety and agent-trace checks) with
-the predictions TypeSafe's hosted Jev 1.13.0 returned for the very same cases.
+`report.json` measures how closely a model copies its teacher. JevBench measures something else: **accuracy
+on ground-truth answers, side by side with TypeSafe Jev itself, on the very same cases.**
+
+### Which benchmark this is
+
+Several community projects use the name "JevBench" and their numbers are **not comparable** with each other.
+This repo uses one of them, pinned:
+
+| | |
+|---|---|
+| Benchmark | **Leanmcp JevBench v0.1**, *"JevBench: An Open Evaluation Framework for Typed Decision Models"* (Pai & Xian) |
+| Code / data | [github.com/Leanmcp/jevbench](https://github.com/Leanmcp/jevbench) · [huggingface.co/datasets/Leanmcp/jevbench](https://huggingface.co/datasets/Leanmcp/jevbench) at revision `ed50fe0` (tag v0.1) |
+| Reference system | **TypeSafe Jev 1.13.0**: its per-case predictions, collected by the benchmark authors from `api.typesafe.ai` on 2026-09-26 and published with the cases |
+| Status | a community benchmark, **not official** and not endorsed by TypeSafe; released about two weeks after Jev |
+
+### What the code measures
+
+Each case is a question from an established public dataset with a known answer, turned into a typed decision.
+`python -m jev.bench` scores **10 text slices**:
+
+| Slice | Kind | Cases | Source dataset | The decision |
+|---|---|---:|---|---|
+| `medqa_usmle` | choice | 1,000 | [MedQA-USMLE](https://huggingface.co/datasets/GBaker/MedQA-USMLE-4-options) | best answer to a USMLE clinical vignette (4 options) |
+| `medmcqa` | choice | 1,000 | [MedMCQA](https://huggingface.co/datasets/openlifescienceai/medmcqa) | medical entrance-exam question (4 options) |
+| `pubmedqa` | choice | 500 | [PubMedQA](https://huggingface.co/datasets/qiaojin/PubMedQA) | does the abstract answer the research question: yes / no / maybe |
+| `mmlu_pro` | choice | 1,000 | [MMLU-Pro](https://huggingface.co/datasets/TIGER-Lab/MMLU-Pro) | multi-domain knowledge question (10 options) |
+| `scienceqa_text` | choice | 1,000 | [ScienceQA](https://huggingface.co/datasets/derek-thomas/ScienceQA) | grade-school science question, text only |
+| `aegis2` | noul | 500 | [Aegis 2.0](https://huggingface.co/datasets/nvidia/Aegis-AI-Content-Safety-Dataset-2.0) | is this user prompt unsafe? |
+| `aegis2_response` | noul | 500 | Aegis 2.0 | is this assistant response unsafe? |
+| `jailbreak_classification` | noul | 400 | [jailbreak-classification](https://huggingface.co/datasets/jackhhao/jailbreak-classification) | is this prompt a jailbreak attempt? |
+| `prompt_injections` | noul | 116 | [deepset prompt-injections](https://huggingface.co/datasets/deepset/prompt-injections) | does this text try to inject instructions? |
+| `atbench500` | noul | 500 | [ATBench](https://huggingface.co/datasets/AI45Research/ATBench) | is this AI agent's tool-use trajectory unsafe? |
+
+Choice slices contain every question twice, once with the options reordered, so 1,000 cases are 500 questions.
+**Not scored:** `banking77` (77 options, more than the head's 16 choice slots), `sst5` (its text is withheld by
+the release) and the two image slices (this is a text model).
+
+**How a case is scored.** The case's `state` fields are rendered as labelled text, the options keep their
+order, and a noul question gets its true/false meaning appended. The model's calibrated probabilities are then
+scored against the gold answer: **accuracy** (top option; for noul `P(true) ≥ 0.5`), **ECE** (10 confidence
+bins) and **Brier**. TypeSafe's probabilities for the same cases go through the same code, case by case; doing
+so reproduces the per-slice accuracies the benchmark publishes for Jev (9 of 10 slices exactly, the tenth
+within one tied case). Inputs are cut to 1,024 tokens by default (`--max_length`), which matters for the long
+agent trajectories in `atbench500`.
+
+**Limits to keep in mind.** The source datasets are public, so parts may have been seen during the
+pretraining of any model compared here (the release marks them as likely exposed). Jev's numbers come from a
+single run on one date. Rendering choices (how `state` is turned into text, the noul hint) affect results,
+and the reported numbers here are for this rendering.
+
+### Running it
 
 One command runs the full report: the trained model, its **untrained backbone** as a baseline (a fresh head
 starting from the base model's own answer-token preferences, no training), charts and a summary table:
@@ -448,12 +577,6 @@ python -m jev.bench_report --model your-name/jev-9b        # -> bench/jev-9b/
 slice: zero-shot, trained, Jev) and `summary.md`, which splits each slice's result into **what training
 added** and **the remaining gap to Jev**. Finished steps are reused on re-runs (`--rerun` to recompute). The
 pieces also run on their own: `python -m jev.bench --model ...`, `--zero_shot BASE`, `python -m jev.plot_bench`.
-
-It prints accuracy and ECE per slice for both systems, scored case by case with the same code (recomputing
-Jev's published per-slice accuracy from its raw predictions matches to within one tied case), and the
-model's accuracy as a share of Jev's. `banking77` (77 options, more than the head's 16 choice slots) and
-`sst5` (text withheld by the release) are skipped. Data is downloaded at a pinned revision; each case keeps
-its source dataset's licence.
 
 ## 🔮 Inference
 

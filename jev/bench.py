@@ -5,9 +5,13 @@
     python3 -m jev.bench --model runs/jev-9b/best --limit 50          # quick look
     python3 -m jev.bench --zero_shot Qwen/Qwen3.5-9B --out bench-zeroshot.json   # untrained baseline
 
-Data: the public JevBench release (https://huggingface.co/datasets/Leanmcp/jevbench, pinned below):
-cases built from public datasets with gold answers, plus the predictions TypeSafe's hosted Jev 1.13.0
-returned for the very same cases. Both systems are scored here with the same code, case by case.
+Benchmark: Leanmcp JevBench v0.1, "JevBench: An Open Evaluation Framework for Typed Decision Models"
+(Pai & Xian; https://github.com/Leanmcp/jevbench, data https://huggingface.co/datasets/Leanmcp/jevbench, pinned
+below). A community benchmark, not official, and distinct from other projects named "JevBench". Its cases
+come from public datasets with gold answers (MedQA, MedMCQA, PubMedQA, MMLU-Pro, ScienceQA, Aegis 2.0,
+jailbreak-classification, deepset prompt-injections, ATBench), and it publishes the predictions TypeSafe's
+hosted Jev 1.13.0 returned for the very same cases (2026-09-26). Both systems are scored here with the same
+code, case by case.
 
 Skipped slices: banking77 (77 options; the 24-slot head scores at most 16) and sst5 (its text is
 withheld for licensing). Each case keeps its source dataset's licence; nothing is redistributed here.

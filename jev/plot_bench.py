@@ -86,7 +86,8 @@ def plot(data: dict, out: Path, theme: str = "light", model_name: str | None = N
     height_in = fig.get_figheight()
     line = 0.3 / height_in  # one text line, in figure-fraction units
     top_y = 1 - 0.18 / height_in
-    fig.text(0.01, top_y, f"JevBench: {ours_label} vs {teacher_label}", ha="left", va="top", fontsize=13,
+    bench = "Leanmcp JevBench v0.1" if "Leanmcp/jevbench" in str(data.get("data", "")) else "JevBench"
+    fig.text(0.01, top_y, f"{bench}: {ours_label} vs {teacher_label}", ha="left", va="top", fontsize=13,
              color=c["text"], fontweight="bold")
     summary = (f"All {o['n']:,} cases: accuracy {o['acc']:.1%} vs {t['acc']:.1%} "
                f"({o['acc'] / t['acc']:.1%} of Jev's) · ECE {o['ece']:.3f} vs {t['ece']:.3f}")
