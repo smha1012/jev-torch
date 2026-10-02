@@ -753,8 +753,15 @@ Jev) or autotrust.</sub>
 
 ## 📄 License
 
-Code: [Apache-2.0](LICENSE).
+| | License | Commercial use |
+|---|---|---|
+| **Code** (this repository) | [Apache-2.0](LICENSE) | allowed |
+| **Trained weights** released from this project (e.g. `jev-9b`) | [CC BY-NC 4.0](https://creativecommons.org/licenses/by-nc/4.0/) | **not allowed** |
 
 > [!IMPORTANT]
-> The corpus is Apache-2.0 (its Open-Jev stream is CC0), but its `yuri_v3` labels are outputs of the closed
-> TypeSafe Jev 1.13 model. Check that model's terms before any commercial use of weights trained on them.
+> **The released weights are for non-commercial use only.** Most of their training labels are outputs of
+> the closed TypeSafe Jev 1.13 model (the `yuri_v3` stream of the corpus, which is itself Apache-2.0 with a
+> CC0 Open-Jev stream). For other uses, contact the author.
+>
+> Weights **you** train with this code on the JEV corpus inherit the same caveat: check TypeSafe's terms
+> before any commercial use. Models trained on your own data are governed by that data's terms.

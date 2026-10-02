@@ -51,7 +51,7 @@ def build_model_card(ckpt: Path, repo_id: str, status: str | None = None) -> str
     temps = meta.get("temperature", {})
 
     front = {
-        "license": "apache-2.0",
+        "license": "cc-by-nc-4.0",  # weights: non-commercial (labels come from a closed model)
         "base_model": base,
         "library_name": "peft",
         "pipeline_tag": "text-classification",
@@ -138,8 +138,11 @@ target probabilities (the usual ECE where targets are one-hot).
 
 ## License and attribution
 
-Weights: Apache-2.0. The training corpus is Apache-2.0, but part of its labels are outputs of the closed
-TypeSafe Jev 1.13 model; check that model's terms before commercial use.
+**Weights: [CC BY-NC 4.0](https://creativecommons.org/licenses/by-nc/4.0/), non-commercial use only.** Most
+training labels are outputs of the closed TypeSafe Jev 1.13 model, so the weights are not offered for
+commercial use. For other uses, contact the author.
+
+The code that trains and loads the model, [jev-torch](https://github.com/smha1012/jev-torch), is Apache-2.0.
 This is an independent project, not affiliated with TypeSafe AI or autotrust.
 """
     return "---\n" + yaml.safe_dump(front, sort_keys=False) + "---\n" + body
