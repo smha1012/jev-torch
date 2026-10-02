@@ -360,6 +360,23 @@ runs/jev-9b/
 
 </details>
 
+## 🏁 JevBench: accuracy against TypeSafe Jev
+
+`report.json` measures how closely a model copies its teacher. To see how it does on **ground-truth labels
+next to TypeSafe Jev itself**, run [JevBench](https://huggingface.co/datasets/Leanmcp/jevbench): public
+benchmark cases (MedQA, MedMCQA, PubMedQA, MMLU-Pro, ScienceQA, content-safety and agent-trace checks) with
+the predictions TypeSafe's hosted Jev 1.13.0 returned for the very same cases.
+
+```bash
+python -m jev.bench --model your-name/jev-9b --out bench.json
+```
+
+It prints accuracy and ECE per slice for both systems, scored case by case with the same code (recomputing
+Jev's published per-slice accuracy from its raw predictions matches to within one tied case), and the
+model's accuracy as a share of Jev's. `banking77` (77 options, more than the head's 16 choice slots) and
+`sst5` (text withheld by the release) are skipped. Data is downloaded at a pinned revision; each case keeps
+its source dataset's licence.
+
 ## 🔮 Inference
 
 ```python
@@ -487,6 +504,7 @@ jev/
 ├── launch.py       # reads train.num_gpus, re-executes under torchrun
 ├── train.py        # training entry point
 ├── evaluate.py     # compare a checkpoint with the teacher and the autotrust references
+├── bench.py        # JevBench: ground-truth accuracy next to TypeSafe Jev 1.13.0
 ├── report.py       # teacher-row metrics and the comparison table
 ├── predict.py      # JEVPredictor + CLI
 ├── push_to_hub.py  # model card + manual upload
@@ -505,7 +523,7 @@ docs/assets/        # README artwork (python docs/assets/build.py)
 - [x] Qwen3.5 0.8B → 27B configs, data parallel, QLoRA
 - [x] Resumable training, W&B, RunPod scripts, Hub uploads with model cards
 - [ ] Validate multi-GPU training on CUDA end to end
-- [ ] Publish trained checkpoints and `test_set_30k` results
+- [ ] Publish trained checkpoints, `test_set_30k` and JevBench results
 - [ ] Kind-stratified batches and token-budget micro-batches (as in JEV-9B)
 - [ ] FSDP for backbones that do not fit on one GPU
 

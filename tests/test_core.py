@@ -461,3 +461,29 @@ def test_ece_is_zero_for_a_perfect_student_and_standard_for_hard_labels():
     hard = F.one_hot(target.argmax(1), 4).float()
     m = compute_metrics(torch.randn(2000, 4), hard, target.argmax(1), mask)
     assert abs(m["ece"] - m["ece_top1"]) < 1e-6   # one-hot targets: identical to the usual ECE
+
+
+# -- JevBench conversion -------------------------------------------------------------
+
+
+def test_jevbench_case_conversion_and_scoring():
+    from jev.bench import case_to_example, render_state, score, teacher_probs
+
+    choice = {"case_id": "c1", "task_type": "choice", "gold": "b", "state": {"vignette": "A 40-year-old ..."},
+              "question": {"instructions": "Select the single best answer.",
+                           "criteria": {"a": "aspirin", "b": "heparin", "c": "warfarin"}}}
+    ex, keys = case_to_example(choice)
+    assert ex.kind == "choice" and ex.options == ["aspirin", "heparin", "warfarin"] and ex.label == 1
+    assert ex.state == "vignette:\nA 40-year-old ..." == render_state(choice["state"])
+    assert teacher_probs({"answer_type": "choice", "probabilities": {"b": 0.7, "a": 0.2, "c": 0.1}}, keys) == [0.2, 0.7, 0.1]
+
+    noul = {"case_id": "n1", "task_type": "noul", "gold": True, "state": {"user_prompt": "hi"},
+            "question": {"instructions": "Is it unsafe?", "criteria": {"true": "unsafe", "false": "safe"}}}
+    ex, keys = case_to_example(noul)
+    assert ex.options == ["false", "true"] and ex.label == 1 and "true: unsafe" in ex.question
+    assert teacher_probs({"answer_type": "noul", "p_true": 0.5}, keys) == [0.5, 0.5]
+    assert score([[0.5, 0.5]], [1], "noul")["acc"] == 1.0      # p_true >= 0.5 counts as true
+    assert score([[0.5, 0.5]], [1], "choice")["acc"] == 0.0
+
+    too_many = {**choice, "question": {"instructions": "x", "criteria": {str(i): str(i) for i in range(20)}}, "gold": "3"}
+    assert case_to_example(too_many) is None                    # more options than the head has slots
