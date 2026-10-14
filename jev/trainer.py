@@ -350,6 +350,17 @@ class Trainer:
 
     # -- calibration + final report -----------------------------------------------------------
 
+    def export_vllm(self, best: Path):
+        """best/adapter_vllm for vLLM serving; a failure is reported but never loses the trained checkpoint."""
+        from .export_vllm import export
+
+        try:
+            info = export(best, best / "adapter_vllm", self.cfg.train.vllm_backbone)
+            self.ctx.print(f"vLLM export -> {info['out']} (backbone {info['backbone']}, "
+                           f"lm_head rel err {info['lm_head_rel_err']:.1e})")
+        except Exception as e:  # noqa: BLE001 - serving export is optional
+            self.ctx.print(f"vLLM export skipped: {type(e).__name__}: {e}")
+
     def calibrate_and_report(self) -> dict:
         ctx = self.ctx
         best = self.out / "best"
@@ -365,6 +376,8 @@ class Trainer:
         ctx.print("temperatures " + " ".join(f"{k}={v:.3f}" for k, v in report["temperature"].items()))
         if ctx.is_main:
             self.model.save(best)
+            if self.cfg.train.export_vllm:
+                self.export_vllm(best)
         ctx.barrier()
 
         for name, examples in self.evals.items():

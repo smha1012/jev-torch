@@ -89,6 +89,11 @@ class TrainConfig:
     # "owner/name" = push there (token required), null = never. Pushes every epoch end + final.
     hf_push: str | None = "auto"
     hf_private: bool = True
+    # After calibration, also write <output_dir>/best/adapter_vllm (jev.export_vllm) so the checkpoint can be
+    # served by vLLM; it is uploaded with the checkpoint. vllm_backbone = the model vLLM will load
+    # (null = model.name); a text-only copy of the backbone avoids vLLM's multimodal model class.
+    export_vllm: bool = True
+    vllm_backbone: str | None = None
 
 
 @dataclass

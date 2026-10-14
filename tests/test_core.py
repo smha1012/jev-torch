@@ -487,3 +487,96 @@ def test_jevbench_case_conversion_and_scoring():
 
     too_many = {**choice, "question": {"instructions": "x", "criteria": {str(i): str(i) for i in range(20)}}, "gold": "3"}
     assert case_to_example(too_many) is None                    # more options than the head has slots
+
+
+# -- vLLM export -----------------------------------------------------------------
+
+
+def test_lm_head_lora_reproduces_head_probabilities():
+    from jev.export_vllm import head_to_lm_head_lora
+    from jev.vllm_client import decision_probs
+
+    torch.manual_seed(0)
+    V, H, scale, T = 300, 16, 2.0, 1.3
+    ids = [7, 3, 250, 11, 42, 99, 100, 101, 5, 6, 8, 9, 10, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22]
+    w_lm, w_head, bias, h = torch.randn(V, H), torch.randn(24, H), torch.randn(24), torch.randn(H)
+    a, b = head_to_lm_head_lora(w_lm, w_head, ids, rank=32, scale=scale)
+    assert a.shape == (32, H) and b.shape == (V, 32)
+    assert torch.allclose(w_lm[ids] + scale * b[ids] @ a, w_head, atol=1e-5)
+    others = torch.ones(V, dtype=torch.bool)
+    others[ids] = False
+    assert b[others].abs().sum() == 0  # every other token keeps the base model's logits
+
+    for kind, (first, n) in KIND_SLOTS.items():
+        k = 2 if kind == "noul" else n
+        slots = list(range(first, first + k))
+        want = torch.softmax((w_head @ h + bias)[slots] / T, -1)
+        logits = (w_lm + scale * b @ a) @ h  # what vLLM computes with the lm_head LoRA
+        allowed = [ids[s] for s in slots]
+        lp = torch.log_softmax(logits[allowed], -1)  # processed_logprobs with allowed_token_ids
+        got = decision_probs(dict(zip(allowed, lp.tolist())), allowed, bias[slots].tolist(), T)
+        assert torch.allclose(torch.tensor(got), want, atol=1e-5)
+
+
+def test_export_pads_and_renames_backbone_lora():
+    from jev.export_vllm import pad_lora, rename_layer_key
+
+    a, b = torch.randn(16, 8), torch.randn(12, 16)
+    pa, pb = pad_lora("x.lora_A.weight", a, 32), pad_lora("x.lora_B.weight", b, 32)
+    assert pa.shape == (32, 8) and pb.shape == (12, 32) and torch.allclose(pb @ pa, b @ a)
+    key = "base_model.model.layers.3.mlp.up_proj.lora_A.weight"
+    assert rename_layer_key(key, "model.") == "base_model.model.model.layers.3.mlp.up_proj.lora_A.weight"
+    assert rename_layer_key(key, "model.language_model.") == \
+        "base_model.model.model.language_model.layers.3.mlp.up_proj.lora_A.weight"
+    with pytest.raises(ValueError):
+        rename_layer_key("base_model.model.lm_head.weight", "model.")
+
+
+def test_vllm_request_matches_training_prompt():
+    from jev.vllm_client import JEVVLLMClient
+
+    client = JEVVLLMClient.__new__(JEVVLLMClient)
+    client.model, client.collator = "jev-decision", JEVCollator(CharTokenizer(), max_length=300)
+    client.head = {"verbalizer_ids": list(range(100, 124))}
+    e = ex("score", list("0123"), label=0, state="x" * 2000)
+    body = client.request(e)
+    batch = JEVCollator(CharTokenizer(), max_length=300)([JEVDataset([e])[0]])
+    assert body["prompt"] == batch["input_ids"][0].tolist()
+    assert body["allowed_token_ids"] == [102, 103, 104, 105] and body["logprobs"] == 4
+    with pytest.raises(ValueError):
+        client.request(ex("noul", ["a", "b", "c"], label=0))
+
+
+def test_vllm_export_is_staged_and_documented(tmp_path):
+    import json
+
+    from jev.hub import stage_checkpoint
+    from jev.push_to_hub import build_model_card
+
+    ckpt = _fake_ckpt(tmp_path)
+    (ckpt / "jev_config.json").write_text(json.dumps({"model": {"name": "Qwen/Qwen3.5-9B", "lora_r": 16,
+                                                                "lora_alpha": 32}}))
+    assert "Serving with vLLM" not in build_model_card(ckpt, "someone/jev-9b")
+    (ckpt / "adapter_vllm").mkdir()
+    (ckpt / "adapter_vllm" / "decision_head.json").write_text(json.dumps({"backbone": "autotrust/JEV-9B"}))
+    (ckpt / "adapter_vllm" / "adapter_config.json").write_text(json.dumps({"r": 32}))
+    card = build_model_card(ckpt, "someone/jev-9b")
+    assert "vllm serve autotrust/JEV-9B --enable-lora --max-lora-rank 32" in card
+    stage = stage_checkpoint(ckpt, tmp_path / "stage", card)
+    assert (stage / "adapter_vllm" / "decision_head.json").exists()
+
+
+def test_vllm_client_is_a_predictor_drop_in(monkeypatch):
+    from jev.vllm_client import JEVVLLMClient
+
+    client = JEVVLLMClient.__new__(JEVVLLMClient)
+    client.concurrency = 4
+    client.head = {"temperature": {"noul": 2.0, "choice": 1.0, "score": 1.0}}
+    monkeypatch.setattr(client, "_logits", lambda e: torch.tensor([0.0, math.log(3.0)] if e.kind == "noul"
+                                                                   else [0.0, 0.0, 0.0]))
+    exs = [ex("noul", ["no", "yes"], label=0), ex("choice", list("abc"), label=0)]
+    assert client.temperature.tolist() == [2.0, 1.0, 1.0]  # KINDS order
+    probs = client.predict_batch(exs)
+    want = torch.softmax(torch.tensor([0.0, math.log(3.0)]) / 2.0, -1).tolist()
+    assert list(probs[0]) == ["no", "yes"] and probs[0]["yes"] == pytest.approx(want[1])
+    assert probs[1]["b"] == pytest.approx(1 / 3)

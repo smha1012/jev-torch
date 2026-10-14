@@ -3,6 +3,7 @@
     python3 -m jev.evaluate --model runs/jev-9b/best
     python3 -m jev.evaluate --model your-name/jev-9b --split test_set_30k --out eval.json
     python3 -m jev.evaluate --model runs/jev-9b/best --limit 2000          # quick look
+    python3 -m jev.evaluate --model runs/jev-9b/best --vllm http://localhost:8000   # the served model
     python3 -m jev.evaluate --model runs/jev-9b/best --split test_set_30k ood \
         --update_report runs/jev-9b/report.json                          # refresh a run's report
 
@@ -52,13 +53,21 @@ def main():
     p.add_argument("--update_report", metavar="REPORT_JSON",
                    help="write the new metrics into a run's report.json (e.g. before refreshing the model card)")
     p.add_argument("--device", default="auto")
+    p.add_argument("--vllm", metavar="URL", help="score through a vLLM server serving the jev.export_vllm module")
+    p.add_argument("--decision_head", help="with --vllm: decision_head.json (default: found under --model)")
     args = p.parse_args()
 
     load_env()
     cfg = load_config(args.config if Path(args.config).exists() else None, env_overrides())
-    jev = JEVPredictor(args.model, device=args.device, batch_size=args.batch_size,
-                       max_length=cfg.data.max_length)
-    temps = jev.model.temperature.cpu()
+    if args.vllm:
+        from .vllm_client import JEVVLLMClient, find_decision_head
+
+        jev = JEVVLLMClient(args.vllm, args.decision_head or find_decision_head(args.model),
+                            max_length=cfg.data.max_length)
+    else:
+        jev = JEVPredictor(args.model, device=args.device, batch_size=args.batch_size,
+                           max_length=cfg.data.max_length)
+    temps = jev.temperature
     results = {}
     for split in args.split:
         examples = load_split(cfg.data, split, args.limit, cfg.train.seed)
@@ -85,7 +94,7 @@ def main():
             print(format_comparison(vs, split))
 
     if args.out:
-        Path(args.out).write_text(json.dumps({"model": args.model, "temperature": dict(zip(KINDS, temps.tolist())),
+        Path(args.out).write_text(json.dumps({"model": args.model, "vllm": args.vllm, "temperature": dict(zip(KINDS, temps.tolist())),
                                               **results}, indent=2))
         print(f"wrote {args.out}")
     if args.update_report:

@@ -605,6 +605,43 @@ python -m jev.evaluate --model your-name/jev-9b                              # c
 python -m jev.push_to_hub --ckpt runs/jev-9b/best --repo your-name/jev-9b    # manual upload
 ```
 
+### Serving with vLLM
+
+`jev.export_vllm` packages a checkpoint the way autotrust/JEV-9B ships `adapter_vllm/`: the decision head
+becomes a LoRA on `lm_head` (its delta is `W_head − W_lm` on the 24 verbalizer rows, so the verbalizer
+logits equal the head's slot logits), the backbone LoRA is padded to the same rank, and the bias and
+per-kind temperatures go to `decision_head.json`. A stock vLLM server then serves decisions, and requests
+without the LoRA module get the unchanged base model for generation.
+
+```bash
+python -m jev.export_vllm --ckpt your-name/jev-9b --backbone autotrust/JEV-9B --out adapter_vllm
+vllm serve autotrust/JEV-9B --enable-lora --max-lora-rank 32 --lora-modules jev-decision=adapter_vllm \
+    --logprobs-mode processed_logprobs --max-model-len 4096
+```
+
+```python
+from jev.vllm_client import JEVVLLMClient
+
+jev = JEVVLLMClient("http://localhost:8000", "adapter_vllm/decision_head.json")
+jev.predict(kind="noul", state="...", question="Should the rollout be paused?", options=["false", "true"])
+```
+
+`--backbone` defaults to the checkpoint's base model. autotrust/JEV-9B's weights are the text tower of
+Qwen3.5-9B, bit for bit, so it serves through vLLM's text-only class; the export also works for the
+multimodal `Qwen/Qwen3.5-9B` (layer names move under `model.language_model`). The client tokenizes with
+the training collator and sends token ids, so vLLM reads the same position the head was trained on.
+`--logprobs-mode processed_logprobs` is required: it makes the returned logprobs respect `allowed_token_ids`.
+
+Training does this for you: after calibration the trainer writes `runs/<name>/best/adapter_vllm/`
+(`train.export_vllm`, on by default; `train.vllm_backbone` picks the model vLLM will load, default
+`model.name`), the Hub upload includes it, and the model card gets the serve command. To check that the
+served model scores like the checkpoint, run the usual evaluations against the server:
+
+```bash
+python -m jev.evaluate --model runs/jev-9b/best --vllm http://localhost:8000   # test_set_30k metrics
+python -m jev.bench --model runs/jev-9b/best --vllm http://localhost:8000      # JevBench
+```
+
 ## 🧩 Extending
 
 <details>
