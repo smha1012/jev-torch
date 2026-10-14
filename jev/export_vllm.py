@@ -1,7 +1,7 @@
 """Export a checkpoint as a vLLM LoRA module, so decisions can be served by a stock vLLM server.
 
     python -m jev.export_vllm --ckpt runs/jev-9b/best --out runs/jev-9b/adapter_vllm
-    python -m jev.export_vllm --ckpt your-name/jev-9b --backbone autotrust/JEV-9B --out adapter_vllm
+    python -m jev.export_vllm --ckpt your-name/jev-9b --out adapter_vllm
 
 The model scores slot i as  head(h)[i] = W_head[i] · h + b[i],  where h is the final hidden state at the
 last prompt token: exactly the input of the backbone's lm_head. A LoRA on lm_head whose delta is
@@ -11,9 +11,9 @@ LoRA is zero-padded to the same rank (its delta is unchanged), and the bias and 
 to decision_head.json for the client (jev/vllm_client.py), which reads the verbalizer logprobs restricted
 by `allowed_token_ids` and adds them back. This is the packaging autotrust/JEV-9B ships as adapter_vllm/.
 
-Serve:
+Serve (--language-model-only for a multimodal backbone such as Qwen/Qwen3.5-9B; see serve_command):
     vllm serve <backbone> --enable-lora --max-lora-rank 32 --lora-modules jev-decision=<out> \\
-        --logprobs-mode processed_logprobs
+        --logprobs-mode processed_logprobs --language-model-only
 """
 
 from __future__ import annotations
@@ -93,6 +93,15 @@ def load_backbone(backbone: str) -> tuple[torch.Tensor, str]:
     return w_lm, "model.language_model." if multimodal else "model."
 
 
+def serve_command(head: dict, rank: int, lora_path: str, sep: str = " ") -> str:
+    """The vllm serve command for an export; a multimodal backbone is served without its vision tower."""
+    args = [f"vllm serve {head['backbone']}", f"--enable-lora --max-lora-rank {rank}",
+            f"--lora-modules jev-decision={lora_path}", "--logprobs-mode processed_logprobs"]
+    if head.get("language_model_only"):
+        args.append("--language-model-only")
+    return sep.join(args)
+
+
 def export(ckpt: str, out: str | Path, backbone: str | None = None, rank: int = 32) -> dict:
     from safetensors.torch import load_file, save_file
 
@@ -148,20 +157,20 @@ def export(ckpt: str, out: str | Path, backbone: str | None = None, rank: int = 
         "temperature": dict(zip(KINDS, state["temperature"].float().tolist())),
         "tokenizer": cfg.name,
         "backbone": backbone,
+        "language_model_only": prefix != "model.",
         "note": "slot logit = verbalizer logprob (allowed_token_ids, processed_logprobs) + bias; "
                 "probabilities = softmax(slot logits / temperature[kind])",
     }
     (out / "decision_head.json").write_text(json.dumps(head, indent=1))
     return {"out": str(out), "backbone": backbone, "rank": rank, "lm_head_rel_err": err,
-            "targets": sorted(targets), "verbalizer_ids": ids}
+            "targets": sorted(targets), "verbalizer_ids": ids, "serve": serve_command(head, rank, str(out))}
 
 
 def main():
     p = argparse.ArgumentParser()
     p.add_argument("--ckpt", required=True, help="checkpoint directory or Hugging Face Hub repo id")
     p.add_argument("--out", required=True, help="output directory for the vLLM LoRA module")
-    p.add_argument("--backbone", help="model vLLM will serve (default: the checkpoint's base model); "
-                                      "a text-only one such as autotrust/JEV-9B avoids the multimodal class")
+    p.add_argument("--backbone", help="model vLLM will serve (default: the checkpoint's base model)")
     p.add_argument("--rank", type=int, default=32, help="LoRA rank of the export (>= 24); pass it as --max-lora-rank")
     args = p.parse_args()
 
@@ -170,8 +179,7 @@ def main():
     load_env()  # HF_TOKEN for private or gated checkpoints
     info = export(args.ckpt, args.out, args.backbone, args.rank)
     print(json.dumps(info, indent=1))
-    print(f"\nvllm serve {info['backbone']} --enable-lora --max-lora-rank {info['rank']} "
-          f"--lora-modules jev-decision={info['out']} --logprobs-mode processed_logprobs")
+    print(f"\n{info['serve']}")
 
 
 if __name__ == "__main__":

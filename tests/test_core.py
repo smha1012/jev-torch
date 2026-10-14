@@ -561,7 +561,12 @@ def test_vllm_export_is_staged_and_documented(tmp_path):
     (ckpt / "adapter_vllm" / "decision_head.json").write_text(json.dumps({"backbone": "autotrust/JEV-9B"}))
     (ckpt / "adapter_vllm" / "adapter_config.json").write_text(json.dumps({"r": 32}))
     card = build_model_card(ckpt, "someone/jev-9b")
-    assert "vllm serve autotrust/JEV-9B --enable-lora --max-lora-rank 32" in card
+    assert "vllm serve autotrust/JEV-9B \\\n    --enable-lora --max-lora-rank 32" in card
+    assert "--language-model-only" not in card
+    (ckpt / "adapter_vllm" / "decision_head.json").write_text(json.dumps({"backbone": "Qwen/Qwen3.5-9B",
+                                                                          "language_model_only": True}))
+    card = build_model_card(ckpt, "someone/jev-9b")
+    assert "--logprobs-mode processed_logprobs \\\n    --language-model-only" in card
     stage = stage_checkpoint(ckpt, tmp_path / "stage", card)
     assert (stage / "adapter_vllm" / "decision_head.json").exists()
 

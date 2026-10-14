@@ -41,12 +41,15 @@ def _metrics_table(report: dict) -> str:
 
 def _vllm_section(ckpt: Path, repo_id: str) -> str:
     """Serving instructions when the checkpoint carries a jev.export_vllm module."""
+    from .export_vllm import serve_command
+
     head = ckpt / "adapter_vllm" / "decision_head.json"
     if not head.exists():
         return ""
     meta = json.loads(head.read_text())
     backbone = meta["backbone"]
     rank = json.loads((ckpt / "adapter_vllm" / "adapter_config.json").read_text())["r"]
+    serve = serve_command(meta, rank, repo_id.split("/")[-1] + "/adapter_vllm", sep=" \\\n    ")
     return f"""
 ### Serving with vLLM
 
@@ -56,8 +59,7 @@ return decisions; requests to the base model name get `{backbone}` unchanged.
 
 ```bash
 hf download {repo_id} --include "adapter_vllm/*" --local-dir {repo_id.split('/')[-1]}
-vllm serve {backbone} --enable-lora --max-lora-rank {rank} \\
-    --lora-modules jev-decision={repo_id.split('/')[-1]}/adapter_vllm --logprobs-mode processed_logprobs
+{serve}
 ```
 
 ```python
