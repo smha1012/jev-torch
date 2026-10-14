@@ -51,6 +51,10 @@ def decision_probs(logprobs: dict[int, float], ids: list[int], bias: list[float]
     return [x / sum(e) for x in e]
 
 
+NEUTRAL_SAMPLING = {"temperature": 1.0, "top_p": 1.0, "top_k": -1, "min_p": 0.0, "repetition_penalty": 1.0,
+                    "presence_penalty": 0.0, "frequency_penalty": 0.0}
+
+
 class JEVVLLMClient:
     """Drop-in for JEVPredictor (`logits`, `predict_batch`, `predict`, `temperature`) backed by a vLLM server,
     so jev.evaluate / jev.bench can score the served model with the same code."""
@@ -76,8 +80,11 @@ class JEVVLLMClient:
         return {
             "model": self.model,
             "prompt": self.collator._encode(*prompt_parts(ex.kind, ex.state, ex.question, ex.options)),
-            "max_tokens": 1, "temperature": 1.0, "logprobs": len(ids), "allowed_token_ids": ids,
+            "max_tokens": 1, "logprobs": len(ids), "allowed_token_ids": ids,
             "add_special_tokens": False, "return_tokens_as_token_ids": True,
+            # processed logprobs reflect sampling settings, and vLLM fills unset ones from the backbone's
+            # generation_config.json (Qwen3.8-27B: top_k 20, top_p 0.95, which drops tail options): pin them
+            **NEUTRAL_SAMPLING,
         }
 
     def _logits(self, ex: JEVExample) -> torch.Tensor:

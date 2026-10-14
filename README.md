@@ -667,9 +667,10 @@ the server from another language, send the same body (`client.request(example)` 
 {
   "model": "jev-decision",
   "prompt": [<token ids>],
-  "max_tokens": 1, "temperature": 1.0,
-  "logprobs": 2, "allowed_token_ids": [867, 804],
-  "add_special_tokens": false, "return_tokens_as_token_ids": true
+  "max_tokens": 1, "logprobs": 2, "allowed_token_ids": [867, 804],
+  "add_special_tokens": false, "return_tokens_as_token_ids": true,
+  "temperature": 1.0, "top_p": 1.0, "top_k": -1, "min_p": 0.0,
+  "repetition_penalty": 1.0, "presence_penalty": 0.0, "frequency_penalty": 0.0
 }
 ```
 
@@ -681,6 +682,9 @@ the server from another language, send the same body (`client.request(example)` 
   `p = softmax((logprob + bias) / temperature[kind])` over those ids. vLLM normalises the logprobs over the
   allowed ids, which only shifts them by a constant, and the softmax cancels it.
 - `--logprobs-mode processed_logprobs` is required: without it the logprobs ignore `allowed_token_ids`.
+- Send the neutral sampling settings explicitly. The logprobs are taken after sampling processing, and vLLM
+  fills unset fields from the backbone's `generation_config.json`; Qwen3.8-27B's `top_k: 20, top_p: 0.95`
+  would cut off the less likely options.
 
 **Exporting.** Training does this for you: after calibration the trainer writes
 `runs/<name>/best/adapter_vllm/` (`train.export_vllm`, on by default), the Hub upload includes it, and the

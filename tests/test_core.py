@@ -543,6 +543,7 @@ def test_vllm_request_matches_training_prompt():
     batch = JEVCollator(CharTokenizer(), max_length=300)([JEVDataset([e])[0]])
     assert body["prompt"] == batch["input_ids"][0].tolist()
     assert body["allowed_token_ids"] == [102, 103, 104, 105] and body["logprobs"] == 4
+    assert body["top_p"] == 1.0 and body["top_k"] == -1 and body["repetition_penalty"] == 1.0
     with pytest.raises(ValueError):
         client.request(ex("noul", ["a", "b", "c"], label=0))
 
