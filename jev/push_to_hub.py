@@ -39,6 +39,38 @@ def _metrics_table(report: dict) -> str:
     return "\n".join(lines)
 
 
+def _vllm_section(ckpt: Path, repo_id: str) -> str:
+    """Serving instructions when the checkpoint carries a jev.export_vllm module."""
+    from .export_vllm import serve_command
+
+    head = ckpt / "adapter_vllm" / "decision_head.json"
+    if not head.exists():
+        return ""
+    meta = json.loads(head.read_text())
+    backbone = meta["backbone"]
+    rank = json.loads((ckpt / "adapter_vllm" / "adapter_config.json").read_text())["r"]
+    serve = serve_command(meta, rank, repo_id.split("/")[-1] + "/adapter_vllm", sep=" \\\n    ")
+    return f"""
+### Serving with vLLM
+
+`adapter_vllm/` holds the same model as a vLLM LoRA module: the decision head is a LoRA on `lm_head` (the
+verbalizer rows only) and the bias and temperatures are in `decision_head.json`. Requests to `jev-decision`
+return decisions; requests to the base model name get `{backbone}` unchanged.
+
+```bash
+hf download {repo_id} --include "adapter_vllm/*" --local-dir {repo_id.split('/')[-1]}
+{serve}
+```
+
+```python
+from jev.vllm_client import JEVVLLMClient
+
+jev = JEVVLLMClient("http://localhost:8000", "{repo_id.split('/')[-1]}/adapter_vllm/decision_head.json")
+jev.predict(kind="noul", state="...", question="...", options=["false", "true"])
+```
+"""
+
+
 def build_model_card(ckpt: Path, repo_id: str, status: str | None = None) -> str:
     """Model card for a checkpoint. `status` marks an intermediate (e.g. per-epoch) upload."""
     meta = json.loads((ckpt / "jev_config.json").read_text())
@@ -91,6 +123,7 @@ autotrust/JEV cards report on:
         settings.append("- **Temperatures:** " + ", ".join(f"{k} {v:.3f}" for k, v in temps.items()))
 
     status_block = f"\n> [!NOTE]\n> {status}\n" if status else ""
+    serving = _vllm_section(ckpt, repo_id)
     body = f"""
 # {repo_id.split('/')[-1]}
 {status_block}
@@ -118,7 +151,7 @@ jev.predict(
 
 Question kinds: `noul` (exactly 2 options, false-like then true-like), `choice` (2–16 options),
 `score` (ordered levels 0–5).
-
+{serving}
 ## Training
 
 {chr(10).join(settings)}

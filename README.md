@@ -605,6 +605,51 @@ python -m jev.evaluate --model your-name/jev-9b                              # c
 python -m jev.push_to_hub --ckpt runs/jev-9b/best --repo your-name/jev-9b    # manual upload
 ```
 
+### Serving with vLLM
+
+`jev.export_vllm` packages a checkpoint as a vLLM LoRA module, `adapter_vllm/`: the decision head
+becomes a LoRA on `lm_head` (its delta is `W_head − W_lm` on the 24 verbalizer rows, so the verbalizer
+logits equal the head's slot logits), the backbone LoRA is padded to the same rank, and the bias and
+per-kind temperatures go to `decision_head.json`. A stock vLLM server then serves decisions, and requests
+without the LoRA module get the unchanged base model for generation.
+
+```bash
+python -m jev.export_vllm --ckpt your-name/jev-9b --out adapter_vllm
+vllm serve Qwen/Qwen3.5-9B --enable-lora --max-lora-rank 32 --lora-modules jev-decision=adapter_vllm \
+    --logprobs-mode processed_logprobs --language-model-only \
+    --max-model-len 2048 --max-num-batched-tokens 8192 --kv-cache-memory 8G
+```
+
+```python
+from jev.vllm_client import JEVVLLMClient
+
+jev = JEVVLLMClient("http://localhost:8000", "adapter_vllm/decision_head.json")
+jev.predict(kind="noul", state="...", question="Should the rollout be paused?", options=["false", "true"])
+```
+
+vLLM loads the base model's weights once and applies the module on top; the checkpoint itself only holds
+the LoRA and the head. `--backbone` defaults to the checkpoint's base model, so the module serves on the
+same `Qwen/Qwen3.5-9B` it was trained on (`--language-model-only` skips its vision tower; the export
+prints the exact command). A text-only copy such as autotrust/JEV-9B also works: pass it as `--backbone`
+and the layer names follow. The client tokenizes with the training collator and sends token ids, so vLLM
+reads the same position the head was trained on. `--logprobs-mode processed_logprobs` is required: it
+makes the returned logprobs respect `allowed_token_ids`.
+
+Sizing: a decision is one forward pass over at most `max_length` (1024) prompt tokens and one output
+token, so the KV cache is held only briefly and Qwen3.5 keeps it for 8 of its 32 layers. For jev-9b on
+one L40S, 2,000 test_set_30k decisions took 22 s at 64 concurrent requests and peaked at 2.3 GiB of KV
+cache; 8 GiB leaves headroom. `--max-num-batched-tokens` matters more for throughput than the KV cache.
+
+Training does this for you: after calibration the trainer writes `runs/<name>/best/adapter_vllm/`
+(`train.export_vllm`, on by default; `train.vllm_backbone` picks the model vLLM will load, default
+`model.name`), the Hub upload includes it, and the model card gets the serve command. To check that the
+served model scores like the checkpoint, run the usual evaluations against the server:
+
+```bash
+python -m jev.evaluate --model runs/jev-9b/best --vllm http://localhost:8000   # test_set_30k metrics
+python -m jev.bench --model runs/jev-9b/best --vllm http://localhost:8000      # JevBench
+```
+
 ## 🧩 Extending
 
 <details>

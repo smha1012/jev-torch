@@ -190,6 +190,11 @@ def _load_causal_lm(cfg: ModelConfig, dtype, device_map):
 
 
 def _verbalizer_rows(lm, tokenizer) -> torch.Tensor:
+    return lm.get_output_embeddings().weight[verbalizer_ids(tokenizer)].detach().float().cpu()
+
+
+def verbalizer_ids(tokenizer) -> list[int]:
+    """Token id of each slot's verbalizer, in slot order."""
     ids = []
     for word in SLOT_VERBALIZERS:
         # Prefer the " word" token (what follows "[decision]:"); Qwen splits the space off digits,
@@ -201,4 +206,4 @@ def _verbalizer_rows(lm, tokenizer) -> torch.Tensor:
                 break
         else:
             raise ValueError(f"verbalizer {word!r} is not a single token for this tokenizer")
-    return lm.get_output_embeddings().weight[ids].detach().float().cpu()
+    return ids

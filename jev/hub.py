@@ -46,6 +46,8 @@ def stage_checkpoint(ckpt: Path, stage: Path, card: str | None = None) -> Path:
     shutil.copy(ckpt / "head.pt", stage)
     shutil.copytree(ckpt / "adapter", stage / "adapter", dirs_exist_ok=True)
     (stage / "adapter" / "README.md").unlink(missing_ok=True)  # PEFT's empty template card
+    if (ckpt / "adapter_vllm").is_dir():  # jev.export_vllm output, for vLLM serving
+        shutil.copytree(ckpt / "adapter_vllm", stage / "adapter_vllm", dirs_exist_ok=True)
     if card is not None:
         (stage / "README.md").write_text(card)
     return stage
@@ -113,7 +115,7 @@ class HubUploader:
             with tempfile.TemporaryDirectory() as tmp:
                 stage = stage_checkpoint(Path(ckpt), Path(tmp), card)
                 info = self.api.upload_folder(repo_id=self.repo, folder_path=str(stage),
-                                              allow_patterns=[*CHECKPOINT_FILES, "README.md"],
+                                              allow_patterns=[*CHECKPOINT_FILES, "adapter_vllm/*", "README.md"],
                                               commit_message=message)
             if tag:
                 try:  # re-point the tag if a previous or resumed run already created it

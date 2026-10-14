@@ -3,6 +3,7 @@
     python3 -m jev.bench --model runs/jev-9b/best
     python3 -m jev.bench --model your-name/jev-9b --out bench.json
     python3 -m jev.bench --model runs/jev-9b/best --limit 50          # quick look
+    python3 -m jev.bench --model runs/jev-9b/best --vllm http://localhost:8000   # the served model
     python3 -m jev.bench --zero_shot Qwen/Qwen3.5-9B --out bench-zeroshot.json   # untrained baseline
 
 Benchmark: Leanmcp JevBench v0.1, "JevBench: An Open Evaluation Framework for Typed Decision Models"
@@ -193,10 +194,19 @@ def main():
     p.add_argument("--max_length", type=int, default=1024)
     p.add_argument("--out", help="write per-slice results as JSON")
     p.add_argument("--device", default="auto")
+    p.add_argument("--vllm", metavar="URL", help="score through a vLLM server serving the jev.export_vllm module")
+    p.add_argument("--decision_head", help="with --vllm: decision_head.json (default: found under --model)")
     args = p.parse_args()
 
     load_env()
-    if args.zero_shot:
+    if args.vllm:
+        from .vllm_client import JEVVLLMClient, find_decision_head
+
+        if not args.model:
+            raise SystemExit("--vllm needs --model (the checkpoint or export directory)")
+        jev = JEVVLLMClient(args.vllm, args.decision_head or find_decision_head(args.model), max_length=args.max_length)
+        label = f"{args.model} (vLLM)"
+    elif args.zero_shot:
         jev = JEVPredictor.zero_shot(args.zero_shot, device=args.device, batch_size=args.batch_size,
                                      max_length=args.max_length)
         label = f"zero-shot {args.zero_shot}"

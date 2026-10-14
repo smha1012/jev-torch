@@ -75,8 +75,13 @@ class JEVPredictor:
             out.extend(lg[i, : len(it["options"])] for i, it in enumerate(items))
         return out
 
+    @property
+    def temperature(self) -> torch.Tensor:
+        """Per-kind calibration temperatures, in KINDS order."""
+        return self.model.temperature.cpu()
+
     def predict_batch(self, examples: list[JEVExample]) -> list[dict[str, float]]:
-        temps = self.model.temperature.cpu()
+        temps = self.temperature
         from .schema import KINDS
 
         res = []
